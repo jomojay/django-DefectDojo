@@ -58,6 +58,31 @@ class DojoLoginView(LoginView):
     template_name = "dojo/login.html"
     authentication_form = AuthenticationForm
 
+    # Query parameter that reveals the local password form even when single sign-on is configured.
+    # DefectDojo Pro documents the same "/login?force_login_form" convention, so operators find the
+    # break-glass path where they expect it. It only affects rendering - it can never re-enable
+    # password authentication that CLASSIC_AUTH_ENABLED turned off.
+    FORCE_LOGIN_FORM_PARAM = "force_login_form"
+
+    def post(self, request, *args, **kwargs):
+        # CLASSIC_AUTH_ENABLED used to be a hardcoded True and was therefore only ever a rendering
+        # hint. Now that it is operator-configurable it has to be a real gate: hiding the form while
+        # still accepting a POST to this view would leave password authentication fully usable.
+        if not settings.CLASSIC_AUTH_ENABLED:
+            raise PermissionDenied
+        return super().post(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        sso_enabled = getattr(settings, "AZUREAD_SSO_ENABLED", False)
+        forced = self.FORCE_LOGIN_FORM_PARAM in self.request.GET
+        context["AZUREAD_SSO_ENABLED"] = sso_enabled
+        context["CLASSIC_AUTH_ENABLED"] = settings.CLASSIC_AUTH_ENABLED
+        # With SSO configured the password form is collapsed by default so the intended path is the
+        # obvious one; it stays reachable through FORCE_LOGIN_FORM_PARAM.
+        context["SHOW_CLASSIC_AUTH_FORM"] = settings.CLASSIC_AUTH_ENABLED and (not sso_enabled or forced)
+        return context
+
     def form_valid(self, form):
         last_login = None
         with contextlib.suppress(Exception):

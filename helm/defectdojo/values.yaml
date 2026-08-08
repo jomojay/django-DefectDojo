@@ -103,6 +103,40 @@ siteUrl: ""
 # the global hostname.
 alternativeHosts: []
 #  - defectdojo.example.com
+
+# -- Single sign-on configuration. Every value here is per-deployment: point the chart at whichever
+# identity provider tenant this instance should trust. Nothing is enabled by default, so leaving
+# this block untouched keeps the instance on local username/password login only.
+#
+# The settings below are injected into the uwsgi, celery worker, celery beat and initializer
+# containers alike. They must match across all of them: the initializer runs `manage.py migrate`,
+# and the `social_django` tables are only created when the flag is on there too.
+sso:
+  # -- Local username/password login. Keep this enabled: it is the break-glass path when the
+  # identity provider is unreachable, and turning it off can lock every user out of the instance.
+  classicAuthEnabled: true
+  azureAd:
+    # -- Enable Microsoft Entra ID (Azure AD) OIDC login.
+    enabled: false
+    # -- Application (client) ID of the app registration.
+    clientId: ""
+    # -- Directory (tenant) ID of the app registration.
+    tenantId: ""
+    # -- Comma separated list of email domains permitted to sign in, e.g. `one.example,two.example`.
+    # Leave empty to rely solely on the single-tenant app registration. An empty list also disables
+    # linking an SSO identity to a pre-existing local DefectDojo account.
+    whitelistedDomains: ""
+    # -- Force the OAuth2 redirect_uri to be built with https. Needed when DefectDojo sits behind a
+    # TLS-terminating proxy that does not forward X-Forwarded-Proto, because the identity provider
+    # compares the redirect_uri against the registered reply URL exactly.
+    redirectIsHttps: true
+    # -- The client secret is never a Helm value. Create the Secret out of band (or through your
+    # secret manager / External Secrets / Sealed Secrets) and reference it here; the chart injects
+    # it with `valueFrom.secretKeyRef`. Pods will not start until the Secret exists, which is the
+    # intended fail-closed behaviour.
+    clientSecret:
+      secretName: defectdojo-sso-azuread
+      secretKey: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET
 imagePullPolicy: Always
 # @schema type:[string, null]
 # -- When using a private registry, name of the secret that holds the registry secret (eg deploy token from gitlab-ci project)

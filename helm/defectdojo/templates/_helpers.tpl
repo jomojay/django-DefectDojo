@@ -333,3 +333,35 @@ from a given context.
 {{- . | toYaml | nindent 2 -}}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+  Single sign-on environment variables.
+
+  Emitted for every container that loads dojo.settings, not just the web tier: the initializer runs
+  `manage.py migrate`, and social_django's tables are only created when the feature flag is on
+  there as well. The client secret is always pulled from an existing Secret - it is never rendered
+  into the manifest as a literal.
+
+  Takes the root context.
+*/}}
+{{- define "defectdojo.ssoEnv" -}}
+- name: DD_CLASSIC_AUTH_ENABLED
+  value: {{ .Values.sso.classicAuthEnabled | quote }}
+{{- if .Values.sso.azureAd.enabled }}
+- name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED
+  value: "true"
+- name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY
+  value: {{ .Values.sso.azureAd.clientId | quote }}
+- name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID
+  value: {{ .Values.sso.azureAd.tenantId | quote }}
+- name: DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS
+  value: {{ .Values.sso.azureAd.whitelistedDomains | quote }}
+- name: DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS
+  value: {{ .Values.sso.azureAd.redirectIsHttps | quote }}
+- name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "sso.azureAd.clientSecret.secretName is required when sso.azureAd.enabled is true" .Values.sso.azureAd.clientSecret.secretName | quote }}
+      key: {{ required "sso.azureAd.clientSecret.secretKey is required when sso.azureAd.enabled is true" .Values.sso.azureAd.clientSecret.secretKey | quote }}
+{{- end }}
+{{- end -}}

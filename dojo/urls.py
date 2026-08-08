@@ -233,6 +233,20 @@ urlpatterns += [
 urlpatterns += api_v2_urls
 urlpatterns += survey_urls
 
+if getattr(settings, "AZUREAD_SSO_ENABLED", False):
+    # social-auth's own views: social:begin (login/<backend>/), social:complete (complete/<backend>/)
+    # and social:disconnect. Mounted under the same url prefix as the rest of DefectDojo, so the
+    # redirect URI registered with the identity provider is
+    # <site>/<url_prefix>complete/azuread-tenant-oauth2/. The prefixed "complete/" and "login/"
+    # paths are added to LOGIN_EXEMPT_URLS in settings so an anonymous browser can reach them.
+    # "login/<backend>/" cannot shadow DefectDojo's own "^login$" route.
+    urlpatterns += [
+        re_path(
+            r"^{}".format(get_system_setting("url_prefix")),
+            include("social_django.urls", namespace="social"),
+        ),
+    ]
+
 if hasattr(settings, "DJANGO_METRICS_ENABLED"):
     if settings.DJANGO_METRICS_ENABLED:
         urlpatterns += [re_path(r"^{}django_metrics/".format(get_system_setting("url_prefix")), include("django_prometheus.urls"))]

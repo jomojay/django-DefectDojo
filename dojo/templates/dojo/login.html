@@ -96,6 +96,43 @@
         color: var(--color-dd-primary-700);
         text-decoration: underline;
     }
+    .login-sso-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        height: 2.75rem;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        border-radius: 0.5rem;
+        background: var(--color-surface);
+        color: var(--color-text);
+        border: 1px solid var(--color-border);
+        transition: background-color 150ms, box-shadow 150ms;
+    }
+    .login-sso-btn:hover {
+        background: var(--color-surface-2);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        text-decoration: none;
+    }
+    .login-separator {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 1.25rem 0;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-muted);
+    }
+    .login-separator::before,
+    .login-separator::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--color-border);
+    }
 {% endblock %}
 
 {% block content %}
@@ -113,10 +150,23 @@
                 </div>
             {% endif %}
 
-            <form method="POST" autocomplete="off"> {% csrf_token %}
-                {% include "dojo/form_fields.html" with form=form %}
+            {# social:begin is POST-only (social-app-django >= 6), so this is a form, not a link. #}
+            {% if AZUREAD_SSO_ENABLED %}
+                <form method="POST" action="{% url 'social:begin' 'azuread-tenant-oauth2' %}"> {% csrf_token %}
+                    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+                    <button class="btn login-sso-btn" id="sso-azuread-tenant-oauth2" type="submit">
+                        <i class="fa-brands fa-microsoft"></i> {% trans "Sign in with Microsoft" %}
+                    </button>
+                </form>
+                {% if SHOW_CLASSIC_AUTH_FORM %}
+                    <div class="login-separator">{% trans "or" %}</div>
+                {% endif %}
+            {% endif %}
 
-                {% if CLASSIC_AUTH_ENABLED %}
+            {% if SHOW_CLASSIC_AUTH_FORM %}
+                <form method="POST" autocomplete="off"> {% csrf_token %}
+                    {% include "dojo/form_fields.html" with form=form %}
+
                     <div class="form-group" style="margin-top: 0.25rem; margin-bottom: 0.75rem;">
                         <button class="btn" id="toggleBox" onclick="togglePassVisibility()" type="button" style="font-size: 0.8125rem; padding: 0.25rem 0;">
                             <i class="fa-solid fa-eye"></i> {% trans "Show Password" %}
@@ -135,8 +185,8 @@
                             {% endif %}
                         </div>
                     {% endif %}
-                {% endif %}
-            </form>
+                </form>
+            {% endif %}
         </div>
     </div>
 {% endblock %}

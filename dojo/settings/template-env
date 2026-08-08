@@ -56,5 +56,33 @@ DD_WHITENOISE=True
 # Security team name, used for outgoing emails
 # DD_TEAM_NAME=Security
 
+# -------------------------------------------------------
+# Single sign-on (Microsoft Entra ID / Azure AD, OIDC)
+# -------------------------------------------------------
+# All values below are per-deployment. Fill in the identifiers of the app registration created in
+# whichever directory this instance should trust; the placeholders are not real values.
+# Redirect URI to register with the identity provider:
+#   https://<your-defectdojo-host>/complete/azuread-tenant-oauth2/
+
+# Local username/password login. Keep it enabled: it is the break-glass path if the identity
+# provider is unreachable, and disabling it can lock every user out of the instance.
+# DD_CLASSIC_AUTH_ENABLED=True
+
+# DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED=True
+# DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY=<application-client-id>
+# DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID=<directory-tenant-id>
+
+# The client secret. Prefer the _FILE form so the value never sits in an env file:
+# DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET_FILE=/run/secrets/defectdojo-sso-client-secret
+# DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET=<client-secret>
+
+# Comma separated email domains allowed to sign in. Leaving it empty relies solely on the
+# single-tenant app registration and disables linking to pre-existing local accounts.
+# DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS=<one.example>,<two.example>
+
+# Force the OAuth2 redirect_uri to https. Needed behind a TLS-terminating proxy that does not
+# forward X-Forwarded-Proto (DD_SECURE_PROXY_SSL_HEADER covers the case where it does).
+# DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS=True
+
 # Admins for log emails
 # DD_ADMINS=Aaron:aaron@localhost,Greg:greg@localhost

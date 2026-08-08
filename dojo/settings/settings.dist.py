@@ -16,6 +16,7 @@ from pathlib import Path
 
 import environ
 from celery.schedules import crontab
+from django.core.exceptions import ImproperlyConfigured
 
 from dojo import __version__
 from dojo.auditlog.settings import (  # noqa: F401 -- re-exported as Django settings
@@ -157,6 +158,31 @@ env = environ.FileAwareEnv(
     DD_FORGOT_PASSWORD=(bool, True),  # do we show link "I forgot my password" on login screen
     DD_PASSWORD_RESET_TIMEOUT=(int, 259200),  # 3 days, in seconds (the deafult)
     DD_FORGOT_USERNAME=(bool, True),  # do we show link "I forgot my username" on login screen
+    # --------------------------------------------------------------------------------------------
+    # Single Sign-On (Microsoft Entra ID / Azure AD, OIDC)
+    #
+    # Every value below is per-deployment runtime configuration: an identity provider is bound to a
+    # DefectDojo instance through the environment, never through this file. Do not commit a tenant
+    # id, client id, client secret or email domain here or in local_settings.py that is checked in.
+    # The client secret is best supplied through the `_FILE` indirection that FileAwareEnv provides
+    # (DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET_FILE=/run/secrets/...) or via a k8s secret ref.
+    # --------------------------------------------------------------------------------------------
+    # Local username/password login. Keep this enabled: it is the break-glass path when the IdP is
+    # unreachable or misconfigured, and disabling it can lock every user out of the instance.
+    DD_CLASSIC_AUTH_ENABLED=(bool, True),
+    DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED=(bool, False),
+    DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY=(str, ""),  # Application (client) ID
+    DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET=(str, ""),  # client secret
+    DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID=(str, ""),  # Directory (tenant) ID
+    # Force the OAuth2 redirect_uri to be built with https. Needed when DefectDojo runs behind a
+    # TLS-terminating proxy that does not forward X-Forwarded-Proto (otherwise DD_SECURE_PROXY_SSL_HEADER
+    # already produces an https redirect_uri). The identity provider compares the redirect_uri against
+    # the registered reply URL character for character, so an http:// value there is rejected.
+    DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS=(bool, False),
+    # Comma separated list of email domains permitted to sign in through SSO, e.g. "one.example,two.example".
+    # Leaving it empty means no domain restriction is applied on top of the single-tenant app registration,
+    # and it also disables linking an SSO identity to a pre-existing local account (see dojo/user/social_pipeline.py).
+    DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS=(str, ""),
     DD_OS_MESSAGE_ENABLED=(bool, True),  # show the open-source "Upgrade to Pro" / OS message promo banner
     # Some security policies require allowing users to have only one active session
     DD_SINGLE_USER_SESSION=(bool, False),
@@ -483,7 +509,7 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.MD5PasswordHasher",
 ]
 
-CLASSIC_AUTH_ENABLED = True
+CLASSIC_AUTH_ENABLED = env("DD_CLASSIC_AUTH_ENABLED")
 FORGOT_PASSWORD = env("DD_FORGOT_PASSWORD")
 REQUIRE_PASSWORD_ON_USER = env("DD_REQUIRE_PASSWORD_ON_USER")
 FORGOT_USERNAME = env("DD_FORGOT_USERNAME")
@@ -998,6 +1024,108 @@ if env("DD_DJANGO_METRICS_ENABLED"):
     DATABASES["default"]["ENGINE"] = database_engine.replace("django.", "django_prometheus.", 1)
     # CELERY_RESULT_BACKEND.replace('django.core','django_prometheus.', 1)
     LOGIN_EXEMPT_URLS += (rf"^{URL_PREFIX}django_metrics/",)
+
+
+# ------------------------------------
+# Single Sign-On - Microsoft Entra ID (Azure AD) over OIDC
+# ------------------------------------
+# The whole feature is inert unless DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED is set, so an
+# instance that does not configure SSO behaves exactly as it did before: no extra app, no extra
+# middleware, no extra url, no extra authentication backend.
+AZUREAD_SSO_ENABLED = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED")
+
+if AZUREAD_SSO_ENABLED:
+    INSTALLED_APPS = (*INSTALLED_APPS, "social_django")
+
+    # The Azure backend is prepended; ModelBackend deliberately stays in the list (and stays
+    # second) so local username/password login keeps working. Local login is never removed.
+    AUTHENTICATION_BACKENDS = (
+        "social_core.backends.azuread_tenant.AzureADTenantOAuth2",
+        *AUTHENTICATION_BACKENDS,
+    )
+
+    # SocialAuthExceptionMiddleware turns social-auth failures (AuthForbidden, AuthCanceled, ...)
+    # into a flash message plus a redirect to SOCIAL_AUTH_LOGIN_ERROR_URL. It must sit *after*
+    # AuthenticationMiddleware and *before* dojo.middleware.LoginRequiredMiddleware: placed after
+    # LoginRequiredMiddleware its redirect gets re-intercepted for the still-anonymous user and the
+    # browser ends up in a login redirect loop. Inserting it directly in front of
+    # LoginRequiredMiddleware satisfies both constraints and additionally guarantees that
+    # MessageMiddleware has already installed request._messages by the time it reports an error.
+    _middleware = list(MIDDLEWARE)
+    _authentication_index = _middleware.index("django.contrib.auth.middleware.AuthenticationMiddleware")
+    _login_required_index = _middleware.index("dojo.middleware.LoginRequiredMiddleware")
+    if _authentication_index >= _login_required_index:
+        _msg = (
+            "MIDDLEWARE ordering is invalid for SSO: "
+            "django.contrib.auth.middleware.AuthenticationMiddleware must precede "
+            "dojo.middleware.LoginRequiredMiddleware"
+        )
+        raise ImproperlyConfigured(_msg)
+    _middleware.insert(_login_required_index, "social_django.middleware.SocialAuthExceptionMiddleware")
+    MIDDLEWARE = _middleware
+    del _middleware, _authentication_index, _login_required_index
+
+    TEMPLATES[0]["OPTIONS"]["context_processors"] += [
+        "social_django.context_processors.backends",
+        "social_django.context_processors.login_redirect",
+    ]
+
+    # social_django's urls are mounted under the same URL_PREFIX as the rest of DefectDojo (see
+    # dojo/urls.py), so the callback the identity provider redirects to is
+    # <site>/<URL_PREFIX>complete/azuread-tenant-oauth2/ and the button target is
+    # <site>/<URL_PREFIX>login/azuread-tenant-oauth2/. Both are reached by an anonymous browser and
+    # therefore have to be exempt from LoginRequiredMiddleware. The pre-existing unprefixed
+    # r"complete/" entry above only matches when URL_PREFIX is empty, so add prefix-aware entries
+    # rather than relying on it. "^login/" cannot shadow DefectDojo's own login page, which is
+    # routed as "^login$" (no trailing slash).
+    LOGIN_EXEMPT_URLS += (
+        rf"^{URL_PREFIX}complete/",
+        rf"^{URL_PREFIX}login/",
+    )
+
+    SOCIAL_AUTH_JSONFIELD_ENABLED = True
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY")
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET")
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID")
+
+    # Per-deployment allow-list, comma separated in the environment. social_core's auth_allowed()
+    # step consumes this setting directly; dojo.user.social_pipeline re-checks it and additionally
+    # refuses to link an SSO identity to an existing local account while it is empty.
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_WHITELISTED_DOMAINS = [
+        domain.strip().lower()
+        for domain in env("DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS").split(",")
+        if domain.strip()
+    ]
+
+    # Derive the DefectDojo username from the directory address rather than from the display name
+    # the backend reports as "username": display names are neither unique nor stable, which would
+    # make just-in-time provisioning produce collision-suffixed usernames.
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_USERNAME_IS_FULL_EMAIL = True
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_FORCE_EMAIL_LOWERCASE = True
+
+    SOCIAL_AUTH_LOGIN_REDIRECT_URL = LOGIN_REDIRECT_URL
+    SOCIAL_AUTH_LOGIN_ERROR_URL = LOGIN_URL
+    SOCIAL_AUTH_REDIRECT_IS_HTTPS = env("DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS")
+    # Let SocialAuthExceptionMiddleware handle auth failures consistently, including under DEBUG
+    # (social-auth otherwise defaults this to settings.DEBUG and re-raises).
+    SOCIAL_AUTH_RAISE_EXCEPTIONS = False
+
+    # Deviations from social_core.pipeline.DEFAULT_AUTH_PIPELINE are all DefectDojo additions;
+    # no default step is removed. See dojo/user/social_pipeline.py for what each one enforces.
+    SOCIAL_AUTH_PIPELINE = (
+        "social_core.pipeline.social_auth.social_details",
+        "social_core.pipeline.social_auth.social_uid",
+        "social_core.pipeline.social_auth.auth_allowed",
+        "dojo.user.social_pipeline.enforce_whitelisted_domain",
+        "social_core.pipeline.social_auth.social_user",
+        "dojo.user.social_pipeline.associate_by_verified_email",
+        "social_core.pipeline.user.get_username",
+        "social_core.pipeline.user.create_user",
+        "dojo.user.social_pipeline.enforce_zero_privilege_defaults",
+        "social_core.pipeline.social_auth.associate_user",
+        "social_core.pipeline.social_auth.load_extra_data",
+        "social_core.pipeline.user.user_details",
+    )
 
 
 # ------------------------------------

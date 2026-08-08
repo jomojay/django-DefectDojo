@@ -36,6 +36,8 @@ cryptography==49.0.0
 python-dateutil==2.9.0.post0
 redis==8.0.1
 requests==2.34.2
+social-auth-app-django==6.0.1  # Django integration for OIDC/OAuth2 SSO; requires Django>=5.2
+social-auth-core==5.1.0  # pinned explicitly: provides the azuread_tenant OIDC backend (security-relevant surface)
 sqlalchemy==2.0.51  # Required by Celery broker transport
 urllib3==2.7.0
 uWSGI==2.0.31

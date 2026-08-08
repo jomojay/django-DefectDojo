@@ -6,6 +6,23 @@
 # docker-compose.yml file is not intended for production use without first
 # customizing it to your particular situation.
 ---
+# Single sign-on settings, shared by every container that loads dojo.settings. They have to match
+# across all of them: the initializer runs `manage.py migrate`, and social_django's tables are only
+# created when the feature flag is on there too.
+#
+# Everything here is per-deployment configuration supplied through the environment (or a .env file)
+# - never commit a tenant id, client id or client secret. The client secret can also be handed over
+# as a file with DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET_FILE=/run/secrets/<name>, which the
+# settings module reads through django-environ's FileAwareEnv.
+x-sso-environment: &sso-environment
+  DD_CLASSIC_AUTH_ENABLED: "${DD_CLASSIC_AUTH_ENABLED:-True}"
+  DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED: "${DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED:-False}"
+  DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY: "${DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY:-}"
+  DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET: "${DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET:-}"
+  DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID: "${DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID:-}"
+  DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS: "${DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS:-}"
+  DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS: "${DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS:-False}"
+
 services:
   nginx:
     build:
@@ -53,6 +70,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
+      <<: *sso-environment
     volumes:
         - type: bind
           source: ./docker/extra_settings
@@ -74,6 +92,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
+      <<: *sso-environment
     volumes:
         - type: bind
           source: ./docker/extra_settings
@@ -94,6 +113,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
+      <<: *sso-environment
     volumes:
         - type: bind
           source: ./docker/extra_settings
@@ -115,6 +135,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
+      <<: *sso-environment
     volumes:
         - type: bind
           source: ./docker/extra_settings

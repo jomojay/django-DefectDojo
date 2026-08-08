@@ -4,26 +4,41 @@
 {% block content %}
     {{ block.super }}
     <h3>{% trans "Login" %}</h3>
-    <form class="form-horizontal" method="POST" autocomplete="off"> {% csrf_token %}
-        <fieldset class="col-md-offset-3 col-md-6">
-            {% if "banner_enable"|get_banner_conf %}
-                <div class="well">
-                    {{ "banner_message"|get_banner_conf }}
+    <fieldset class="col-md-offset-3 col-md-6">
+        {% if "banner_enable"|get_banner_conf %}
+            <div class="well">
+                {{ "banner_message"|get_banner_conf }}
+            </div>
+        {% endif %}
+
+        {# social:begin is POST-only (social-app-django >= 6), so this is a form, not a link. #}
+        {% if AZUREAD_SSO_ENABLED %}
+            <form method="POST" action="{% url 'social:begin' 'azuread-tenant-oauth2' %}"> {% csrf_token %}
+                {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+                <div class="form-group">
+                    <div class="col-sm-offset-1 col-sm-6">
+                        <button class="btn btn-primary" id="sso-azuread-tenant-oauth2" type="submit">
+                            <i class="fa-brands fa-microsoft"></i>
+                            {% trans "Sign in with Microsoft" %}
+                        </button>
+                    </div>
                 </div>
-            {% endif %}
+            </form>
+        {% endif %}
 
-            {% include "dojo/form_fields.html" with form=form %}
+        {% if SHOW_CLASSIC_AUTH_FORM %}
+            <form class="form-horizontal" method="POST" autocomplete="off"> {% csrf_token %}
+                {% include "dojo/form_fields.html" with form=form %}
 
-            <!-- Button -->
-            <div class="form-group">
-                <div class="col-sm-offset-1 col-sm-2">
-                    <button class="btn" id="toggleBox" onclick="togglePassVisibility()" type="button">
-                        <i class="fa-solid fa-eye"></i>
-                        {% trans "Show Password" %}
-                    </button>
-                </div>
+                <!-- Button -->
+                <div class="form-group">
+                    <div class="col-sm-offset-1 col-sm-2">
+                        <button class="btn" id="toggleBox" onclick="togglePassVisibility()" type="button">
+                            <i class="fa-solid fa-eye"></i>
+                            {% trans "Show Password" %}
+                        </button>
+                    </div>
 
-                {% if CLASSIC_AUTH_ENABLED %}
                     <div class="col-sm-offset-1 col-sm-2">
                         <button class="btn btn-success">{% trans "Login" %}</button>
                     </div>
@@ -39,8 +54,8 @@
                             </ul>
                         </div>
                     {% endif %}
-                {% endif %}
-            </div>
-        </fieldset>
-    </form>
+                </div>
+            </form>
+        {% endif %}
+    </fieldset>
 {% endblock %}

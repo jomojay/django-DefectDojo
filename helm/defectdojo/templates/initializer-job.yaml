@@ -155,6 +155,7 @@ spec:
             secretKeyRef:
               name: {{ .Values.postgresql.auth.existingSecret }}
               key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey }}
+        {{- include "defectdojo.ssoEnv" . | nindent 8 }}
         {{- with .Values.initializer.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -1399,6 +1399,53 @@
             "description": "The full URL to your defectdojo instance, depends on the domain where DD is deployed, it also affects links in Jira. Use syntax: `siteUrl: 'https://\u003cyourdomain\u003e'`",
             "type": "string"
         },
+        "sso": {
+            "description": "Single sign-on configuration. Every value here is per-deployment: point the chart at whichever identity provider tenant this instance should trust.",
+            "type": "object",
+            "properties": {
+                "azureAd": {
+                    "type": "object",
+                    "properties": {
+                        "clientId": {
+                            "description": "Application (client) ID of the app registration.",
+                            "type": "string"
+                        },
+                        "clientSecret": {
+                            "description": "Reference to an existing Kubernetes Secret holding the client secret. The secret value is never a Helm value.",
+                            "type": "object",
+                            "properties": {
+                                "secretKey": {
+                                    "type": "string"
+                                },
+                                "secretName": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "enabled": {
+                            "description": "Enable Microsoft Entra ID (Azure AD) OIDC login.",
+                            "type": "boolean"
+                        },
+                        "redirectIsHttps": {
+                            "description": "Force the OAuth2 redirect_uri to be built with https.",
+                            "type": "boolean"
+                        },
+                        "tenantId": {
+                            "description": "Directory (tenant) ID of the app registration.",
+                            "type": "string"
+                        },
+                        "whitelistedDomains": {
+                            "description": "Comma separated list of email domains permitted to sign in.",
+                            "type": "string"
+                        }
+                    }
+                },
+                "classicAuthEnabled": {
+                    "description": "Local username/password login. Keep this enabled as the break-glass path.",
+                    "type": "boolean"
+                }
+            }
+        },
         "tests": {
             "type": "object",
             "properties": {
