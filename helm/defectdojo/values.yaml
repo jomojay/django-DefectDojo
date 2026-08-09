@@ -120,7 +120,10 @@ sso:
     enabled: false
     # -- Application (client) ID of the app registration.
     clientId: ""
-    # -- Directory (tenant) ID of the app registration.
+    # -- Directory (tenant) ID of the app registration. Required when `enabled` is true. Use the
+    # tenant GUID: it is the only form that also gets the in-token `tid` claim validated. The
+    # multi-tenant authorities (`common`, `organizations`, `consumers`) are rejected at startup
+    # because they would accept sign-ins from any Azure tenant.
     tenantId: ""
     # -- Comma separated list of email domains permitted to sign in, e.g. `one.example,two.example`.
     # Leave empty to rely solely on the single-tenant app registration. An empty list also disables

@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
 from social_core.backends.azuread_tenant import AzureADTenantOAuth2
@@ -220,6 +221,76 @@ class TestSsoFlagEnabled(DojoTestCase):
         self.assertFalse(any(matcher.match(path) for matcher in matchers), path)
 
 
+class TestSsoConfigurationIsValidatedAtStartup(DojoTestCase):
+
+    """
+    A half-configured SSO deployment has to fail at import time, not at sign-in time.
+
+    The tenant id is the security-critical one: social_core's
+    ``AzureADTenantOAuth2.validate_configured_tenant()`` parses it with ``UUID()`` and returns
+    without validating anything when that raises, so an empty tenant silently turns the ``tid``
+    claim check into a no-op. Nothing else in the stack reports that.
+    """
+
+    def assert_refuses(self, **environment):
+        with self.assertRaises(ImproperlyConfigured) as raised:
+            load_settings_namespace(**SSO_ENV | environment)
+        return str(raised.exception)
+
+    def test_missing_tenant_id_is_refused(self):
+        message = self.assert_refuses(DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID="")
+
+        self.assertIn("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID", message)
+
+    def test_whitespace_only_tenant_id_is_refused(self):
+        message = self.assert_refuses(DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID="   ")
+
+        self.assertIn("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID", message)
+
+    def test_missing_client_id_is_refused(self):
+        message = self.assert_refuses(DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY="")
+
+        self.assertIn("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY", message)
+
+    def test_missing_client_secret_is_refused(self):
+        message = self.assert_refuses(DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET="")
+
+        self.assertIn("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET", message)
+
+    def test_multi_tenant_authorities_are_refused(self):
+        # These are accepted by Azure, so the deployment would look healthy while accepting
+        # sign-ins from every tenant in the world - and the tid check is skipped for them too.
+        for authority in ("common", "organizations", "consumers", "COMMON"):
+            with self.subTest(authority=authority):
+                message = self.assert_refuses(DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID=authority)
+
+                self.assertIn("multi-tenant authority", message)
+
+    def test_nothing_is_validated_while_the_feature_is_off(self):
+        # The dark-launch guarantee: an instance that never turns SSO on must not be forced to
+        # supply identity provider credentials.
+        namespace = load_settings_namespace(
+            **SSO_ENV | {
+                "DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED": "False",
+                "DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY": "",
+                "DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET": "",
+                "DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID": "",
+            },
+        )
+
+        self.assertFalse(namespace["AZUREAD_SSO_ENABLED"])
+
+    def test_credentials_are_stripped(self):
+        namespace = load_settings_namespace(
+            **SSO_ENV | {"DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID": "  11111111-1111-1111-1111-111111111111 "},
+        )
+
+        self.assertEqual(
+            "11111111-1111-1111-1111-111111111111",
+            namespace["SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID"],
+        )
+
+
 class TestSsoButtonMarkup(DojoTestCase):
 
     """
@@ -229,6 +300,12 @@ class TestSsoButtonMarkup(DojoTestCase):
     exempt it from CSRF), so a plain anchor returns 405. The rendered page cannot be asserted here
     because the URL only exists when the app is installed, so the templates are checked at the
     source level - which is exactly the regression worth guarding.
+
+    The two UI skins each own their own markup (see dojo/template_loaders.py: dojo/templates/ and
+    dojo/templates_classic/ are parallel trees, right down to a private copy of form_fields.html),
+    so the button is written out twice on purpose - the wrappers and CSS classes differ. What must
+    *not* differ is the submission contract below, and asserting it against both files is what keeps
+    the two copies from drifting.
     """
 
     TEMPLATES = (
@@ -255,6 +332,26 @@ class TestSsoButtonMarkup(DojoTestCase):
 
                 self.assertIn("{% if AZUREAD_SSO_ENABLED %}", source)
                 self.assertIn("{% if SHOW_CLASSIC_AUTH_FORM %}", source)
+
+    def test_both_skins_forward_the_next_parameter(self):
+        # Without this the post-login redirect target is dropped on the SSO path only, so a deep
+        # link lands on the dashboard instead of the requested page.
+        for template in self.TEMPLATES:
+            with self.subTest(template=template.name):
+                source = template.read_text(encoding="utf-8")
+
+                self.assertIn(
+                    '{% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}',
+                    source,
+                )
+
+    def test_both_skins_expose_the_same_button_id(self):
+        # The rendering assertions in TestLoginPageWithoutSso and the acceptance tests key off it.
+        for template in self.TEMPLATES:
+            with self.subTest(template=template.name):
+                source = template.read_text(encoding="utf-8")
+
+                self.assertIn('id="sso-azuread-tenant-oauth2"', source)
 
 
 class TestLoginPageWithoutSso(DojoTestCase):

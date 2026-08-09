@@ -1051,14 +1051,27 @@ if AZUREAD_SSO_ENABLED:
     # browser ends up in a login redirect loop. Inserting it directly in front of
     # LoginRequiredMiddleware satisfies both constraints and additionally guarantees that
     # MessageMiddleware has already installed request._messages by the time it reports an error.
+    #
+    # Both entries are looked up defensively rather than with list.index(): a local_settings.py that
+    # rebuilds MIDDLEWARE can drop either one, and an unhandled ValueError traceback out of the
+    # settings module is a much worse diagnostic than the message below.
     _middleware = list(MIDDLEWARE)
-    _authentication_index = _middleware.index("django.contrib.auth.middleware.AuthenticationMiddleware")
-    _login_required_index = _middleware.index("dojo.middleware.LoginRequiredMiddleware")
-    if _authentication_index >= _login_required_index:
+    _authentication_index = (
+        _middleware.index("django.contrib.auth.middleware.AuthenticationMiddleware")
+        if "django.contrib.auth.middleware.AuthenticationMiddleware" in _middleware
+        else None
+    )
+    _login_required_index = (
+        _middleware.index("dojo.middleware.LoginRequiredMiddleware")
+        if "dojo.middleware.LoginRequiredMiddleware" in _middleware
+        else None
+    )
+    if _authentication_index is None or _login_required_index is None or _authentication_index >= _login_required_index:
         _msg = (
             "MIDDLEWARE ordering is invalid for SSO: "
             "django.contrib.auth.middleware.AuthenticationMiddleware must precede "
-            "dojo.middleware.LoginRequiredMiddleware"
+            "dojo.middleware.LoginRequiredMiddleware "
+            "(both entries must be present in MIDDLEWARE)"
         )
         raise ImproperlyConfigured(_msg)
     _middleware.insert(_login_required_index, "social_django.middleware.SocialAuthExceptionMiddleware")
@@ -1084,9 +1097,53 @@ if AZUREAD_SSO_ENABLED:
     )
 
     SOCIAL_AUTH_JSONFIELD_ENABLED = True
-    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY")
-    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET")
-    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID")
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY").strip()
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET").strip()
+    SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID = env("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID").strip()
+
+    # The three values above are what pins this deployment to one identity provider tenant, and
+    # none of them fails loudly on its own when left unset - so validate them here.
+    #
+    # The tenant is the security-critical one. social_core's
+    # AzureADTenantOAuth2.validate_configured_tenant() parses the configured tenant with UUID() and
+    # *returns without validating* when that raises, so an empty tenant silently turns the tid-claim
+    # check into a no-op. The multi-tenant authority aliases are worse: Azure accepts them, so the
+    # deployment appears to work while any tenant in the world can obtain a token for it and the tid
+    # check is skipped as well. Refuse to start in either case.
+    #
+    # A verified domain name (contoso.onmicrosoft.com) is deliberately still allowed: the tid check
+    # is skipped for it too, but the authority endpoint itself is scoped to that one tenant, so the
+    # single-tenant guarantee holds. A directory (tenant) GUID is the configuration to prefer,
+    # because it is the only form that also gets the in-token tid validation.
+    _SSO_MULTI_TENANT_AUTHORITIES = {"common", "organizations", "consumers"}
+    _missing_sso_settings = [
+        name
+        for name, value in (
+            ("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY", SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY),
+            ("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET", SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET),
+            ("DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID", SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID),
+        )
+        if not value
+    ]
+    if _missing_sso_settings:
+        _msg = (
+            "SSO is enabled (DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED) but required settings are "
+            f"empty: {', '.join(_missing_sso_settings)}. An empty tenant id in particular disables "
+            "the tid-claim tenant check inside social_core, which would let tokens from any Azure "
+            "tenant through. Set all three, or turn the flag off."
+        )
+        raise ImproperlyConfigured(_msg)
+    if SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID.lower() in _SSO_MULTI_TENANT_AUTHORITIES:
+        _msg = (
+            "DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID is set to the multi-tenant authority "
+            f"'{SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID}', which accepts sign-ins from any Azure "
+            "tenant and disables the tid-claim tenant check. Use the directory (tenant) GUID of the "
+            "app registration instead."
+        )
+        raise ImproperlyConfigured(_msg)
+    # Both names are ALL-CAPS enough for django.conf.Settings to adopt them as real settings; they
+    # are scaffolding, not configuration.
+    del _missing_sso_settings, _SSO_MULTI_TENANT_AUTHORITIES
 
     # Per-deployment allow-list, comma separated in the environment. social_core's auth_allowed()
     # step consumes this setting directly; dojo.user.social_pipeline re-checks it and additionally

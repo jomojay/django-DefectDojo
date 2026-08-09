@@ -90,6 +90,23 @@ def _email_is_directory_owned(email, response):
     )
 
 
+def _local_accounts_claiming(storage, email):
+    """
+    Return every local account carrying this address, whether or not it is active.
+
+    ``storage.get_users_by_email()`` goes through social_django's ``filter_active_users()`` and so
+    only ever sees ``is_active=True`` rows. The username-uniqueness check that
+    ``social_core.pipeline.user.get_username`` performs later
+    (``storage.user_exists(username=...)`` -> ``filter_users()``) is *not* active-filtered. A
+    deactivated account is therefore invisible to the link/collision decision while still colliding
+    at creation time, and ``get_username`` resolves that collision by appending a uuid - which would
+    hand a deactivated person a brand new, active, suffixed account instead of refusing the login.
+    """
+    user_model = storage.user_model()
+    email_field = getattr(user_model, "EMAIL_FIELD", "email")
+    return list(user_model._default_manager.filter(**{f"{email_field}__iexact": email}))
+
+
 def enforce_whitelisted_domain(backend, details, **kwargs):
     """
     Reject the authentication unless the claimed address sits in the configured domain allow-list.
@@ -147,6 +164,7 @@ def associate_by_verified_email(backend, details, response=None, user=None, **kw
     * the address to be verified, or to match a directory-owned claim (see
       ``_email_is_directory_owned``),
     * exactly one matching local account,
+    * that account to be active,
     * that account to not already be bound to a different identity on this backend.
 
     When no local account matches, the step does nothing and ``create_user`` provisions a fresh,
@@ -161,9 +179,32 @@ def associate_by_verified_email(backend, details, response=None, user=None, **kw
     if not email:
         return None
 
-    candidates = list(backend.strategy.storage.user.get_users_by_email(email))
+    storage = backend.strategy.storage.user
+    candidates = _local_accounts_claiming(storage, email)
     if not candidates:
+        # Nothing claims the address, so create_user may provision a fresh account - as long as the
+        # username it will derive is actually free. With USERNAME_IS_FULL_EMAIL that username *is*
+        # the address, and get_username resolves a collision by appending a uuid instead of
+        # reporting it, which would produce exactly the shadow account this step exists to prevent.
+        if backend.setting("USERNAME_IS_FULL_EMAIL", default=False) and storage.user_exists(username=email):
+            logger.warning(
+                "SSO login refused for backend %s: %s does not match any local account by email but "
+                "an existing local account already holds that username",
+                backend.name, email,
+            )
+            raise AuthForbidden(backend)
         return None
+
+    if any(not candidate.is_active for candidate in candidates):
+        # Deactivation is how DefectDojo revokes access, so this is a revoked account. Falling
+        # through to create_user would re-admit the person under a uuid-suffixed username, because
+        # the username collision check downstream is not active-filtered even though the email
+        # lookup is. Refuse instead; an administrator reactivates the account if that is intended.
+        logger.warning(
+            "SSO login refused for backend %s: %s belongs to a deactivated local account",
+            backend.name, email,
+        )
+        raise AuthForbidden(backend)
 
     allowed = _allowed_domains(backend)
     if not allowed:
@@ -199,7 +240,7 @@ def associate_by_verified_email(backend, details, response=None, user=None, **kw
         raise AuthFailed(backend, msg)
 
     matched = candidates[0]
-    if backend.strategy.storage.user.get_social_auth_for_user(matched, provider=backend.name).exists():
+    if storage.get_social_auth_for_user(matched, provider=backend.name).exists():
         # The account is already bound to a different subject on this backend. Adding a second
         # binding would let two distinct directory identities drive one DefectDojo account.
         logger.warning(

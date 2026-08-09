@@ -351,9 +351,15 @@ from a given context.
 - name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ENABLED
   value: "true"
 - name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY
-  value: {{ .Values.sso.azureAd.clientId | quote }}
+  value: {{ required "sso.azureAd.clientId is required when sso.azureAd.enabled is true" .Values.sso.azureAd.clientId | quote }}
+{{- /*
+  tenantId is what pins the deployment to a single directory. Left empty, social_core's
+  validate_configured_tenant() skips the tid-claim check entirely, so fail the render rather than
+  ship a pod that would accept tokens from any tenant. dojo/settings/settings.dist.py raises
+  ImproperlyConfigured for the same case, this just moves the failure to `helm install`.
+*/}}
 - name: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID
-  value: {{ .Values.sso.azureAd.tenantId | quote }}
+  value: {{ required "sso.azureAd.tenantId is required when sso.azureAd.enabled is true (use the directory GUID, not 'common')" .Values.sso.azureAd.tenantId | quote }}
 - name: DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS
   value: {{ .Values.sso.azureAd.whitelistedDomains | quote }}
 - name: DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS

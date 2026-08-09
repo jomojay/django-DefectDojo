@@ -308,13 +308,30 @@ class TestAssociateByVerifiedEmail(DojoTestCase):
 
         self.assertIsNone(result)
 
-    def test_ignores_inactive_local_accounts(self):
+    def test_refuses_when_the_matching_local_account_is_deactivated(self):
+        # Deactivation is how access is revoked. social_django's get_users_by_email() only sees
+        # active rows, so this used to look like "no match" and fall through to create_user - see
+        # TestProvisioningPipelineEndToEnd.test_a_deactivated_account_cannot_come_back_through_sso
+        # for the shadow account that produced.
         self.local_user.is_active = False
         self.local_user.save()
         backend = _FakeAzureBackend(whitelisted_domains=[ALLOWED_DOMAIN])
         claims = entra_claims(self.email)
 
-        self.assertIsNone(associate_by_verified_email(backend, details_from(claims), response=claims))
+        with self.assertRaises(AuthForbidden):
+            associate_by_verified_email(backend, details_from(claims), response=claims)
+
+    def test_refuses_when_another_account_already_holds_the_derived_username(self):
+        # No account claims the address, but with USERNAME_IS_FULL_EMAIL the username create_user
+        # would derive is the address itself, and get_username would dodge the collision with a uuid
+        # suffix rather than report it.
+        email = f"username-holder@{ALLOWED_DOMAIN}"
+        User.objects.create_user(username=email, email=f"different-address@{ALLOWED_DOMAIN}")
+        backend = _FakeAzureBackend(whitelisted_domains=[ALLOWED_DOMAIN])
+        claims = entra_claims(email)
+
+        with self.assertRaises(AuthForbidden):
+            associate_by_verified_email(backend, details_from(claims), response=claims)
 
 
 class TestEnforceZeroPrivilegeDefaults(DojoTestCase):
@@ -439,6 +456,23 @@ class TestProvisioningPipelineEndToEnd(DojoTestCase):
 
         self.assertFalse(user.is_superuser)
         self.assertFalse(user.is_staff)
+
+    def test_a_deactivated_account_cannot_come_back_through_sso(self):
+        # The regression this guards: the email lookup in associate_by_verified_email is
+        # active-filtered but the username uniqueness check in get_username is not, so a revoked
+        # account used to be invisible to the link decision while still colliding at creation time.
+        # get_username then appended a uuid and create_user provisioned a second, *active* account
+        # for the same person - silently undoing the revocation.
+        backend = _FakeAzureBackend(whitelisted_domains=[ALLOWED_DOMAIN])
+        email = f"revoked@{ALLOWED_DOMAIN}"
+        revoked = User.objects.create_user(username=email, email=email, is_active=False)
+
+        with self.assertRaises(AuthForbidden):
+            self._run(backend, entra_claims(email))
+
+        self.assertEqual([revoked.pk], list(User.objects.filter(email__iexact=email).values_list("pk", flat=True)))
+        self.assertFalse(User.objects.filter(username__startswith=email).exclude(pk=revoked.pk).exists())
+        self.assertFalse(User.objects.get(pk=revoked.pk).is_active)
 
     def test_rejected_domain_never_reaches_account_creation(self):
         backend = _FakeAzureBackend(whitelisted_domains=[ALLOWED_DOMAIN])
