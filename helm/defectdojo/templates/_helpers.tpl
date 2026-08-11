@@ -371,3 +371,26 @@ from a given context.
       key: {{ required "sso.azureAd.clientSecret.secretKey is required when sso.azureAd.enabled is true" .Values.sso.azureAd.clientSecret.secretKey | quote }}
 {{- end }}
 {{- end -}}
+
+{{- /*
+  Feature rollout flag environment variables.
+
+  Emitted for every container that loads dojo.settings, for the same reason as the SSO block above:
+  celery tasks resolve permissions too, so a flag that only reached the web tier would leave the
+  workers disagreeing with the web pods about who can see what.
+
+  Takes the root context.
+*/}}
+{{- define "defectdojo.featureFlagsEnv" -}}
+{{- $rbac := .Values.featureFlags.rbac | toString -}}
+{{- /*
+  dojo/settings/settings.dist.py treats any unrecognised value as "off" (fail closed), which means
+  a typo here would silently disable enforcement on an instance the operator believes is enforcing.
+  Fail the render instead - same reasoning as the required() calls in the SSO helper above.
+*/}}
+{{- if not (has $rbac (list "off" "shadow" "on")) }}
+{{- fail (printf "featureFlags.rbac must be one of off, shadow, on (got %q)" $rbac) }}
+{{- end }}
+- name: DD_FEATURE_RBAC
+  value: {{ $rbac | quote }}
+{{- end -}}

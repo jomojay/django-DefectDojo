@@ -22,6 +22,11 @@ class Product_Type(BaseModel):
     critical_product = models.BooleanField(default=False)
     key_product = models.BooleanField(default=False)
     authorized_users = models.ManyToManyField("dojo.Dojo_User", related_name="authorized_product_types", blank=True)
+    # Role-aware membership, restored alongside the RBAC tables (dojo/authorization/models.py) in
+    # migration 0278. Coexists with authorized_users rather than replacing it - see
+    # INTEGRATIONS_ROADMAP.md §7.4 for how the two are reconciled at authorization time.
+    members = models.ManyToManyField("dojo.Dojo_User", through="dojo.Product_Type_Member", related_name="prod_type_members", blank=True)
+    authorization_groups = models.ManyToManyField("dojo.Dojo_Group", through="dojo.Product_Type_Group", related_name="product_type_groups", blank=True)
 
     class Meta:
         ordering = ("name",)

@@ -93,6 +93,11 @@ class Product(BaseModel):
                                           on_delete=models.RESTRICT)
     tid = models.IntegerField(default=0, editable=False)
     authorized_users = models.ManyToManyField("dojo.Dojo_User", related_name="authorized_products", blank=True)
+    # Role-aware membership, restored alongside the RBAC tables (dojo/authorization/models.py) in
+    # migration 0278. Coexists with authorized_users rather than replacing it - see
+    # INTEGRATIONS_ROADMAP.md §7.4 for how the two are reconciled at authorization time.
+    members = models.ManyToManyField("dojo.Dojo_User", through="dojo.Product_Member", related_name="product_members", blank=True)
+    authorization_groups = models.ManyToManyField("dojo.Dojo_Group", through="dojo.Product_Group", related_name="product_groups", blank=True)
     prod_numeric_grade = models.IntegerField(null=True, blank=True)
 
     # Metadata

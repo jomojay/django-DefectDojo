@@ -229,6 +229,7 @@ spec:
         - name: DD_CSRF_COOKIE_SECURE
           value: {{- if or .Values.django.ingress.activateTLS .Values.django.nginx.tls.enabled }} "True" {{- else }} "False" {{- end }}
         {{- include "defectdojo.ssoEnv" . | nindent 8 }}
+        {{- include "defectdojo.featureFlagsEnv" . | nindent 8 }}
         {{- with .Values.extraEnv }}
           {{- . | toYaml | nindent 8 }}
         {{- end }}

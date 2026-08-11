@@ -1,0 +1,102 @@
+{% load i18n %}
+{% load get_attribute %}
+{% comment %}
+Classic-tree twin of dojo/templates/dojo/_rbac_grant_panel.html. Same context
+contract, same markup - see that file for the full documentation.
+
+The one deliberate divergence: htmx is not loaded in this tree (classic
+base.html has no htmx script tag and no body[hx-headers]), so the row actions
+use the hidden-form-per-row pattern this tree already uses for the Authorized
+Users panel right above. The endpoints are identical and answer with a redirect,
+so both trees drive one code path.
+{% endcomment %}
+<div class="panel panel-default" id="{{ panel_id }}">
+    <div class="panel-heading">
+        <div class="clearfix">
+            <h4 class="pull-left">{{ panel_title }}</h4>
+            &nbsp;
+            {% if can_manage %}
+            <div class="dropdown pull-right">
+                <button class="btn btn-primary dropdown-toggle" label="Actions" type="button"
+                        id="dropdownMenu-{{ panel_id }}" data-toggle="dropdown" aria-expanded="true"
+                        aria-label="{{ add_label }}">
+                    <span class="fa-solid fa-bars"></span>
+                    <span class="caret"></span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-right" role="menu" aria-labelledby="dropdownMenu-{{ panel_id }}">
+                    <li role="presentation">
+                        <a id="{{ add_dom_id }}" href="{{ add_url }}">
+                            <i class="fa-solid fa-user-plus"></i> {{ add_label }}
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% if grants %}
+        <div class="table-responsive">
+            <table class="tablesorter-bootstrap table table-condensed table-striped">
+                <thead>
+                <tr>
+                    {% if can_manage %}<th label="Actions"></th>{% endif %}
+                    <th style="width: 60%;">{{ subject_label }}</th>
+                    <th style="width: 40%;">{% trans "Role" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for grant in grants %}
+                    {% with subject=grant|get_attribute:subject_attr %}
+                    <tr>
+                        {% if can_manage %}
+                        <td>
+                            <form method="post" action="{% url edit_url_name grant.id %}" id="{{ panel_id }}-role-form-{{ grant.id }}" style="display:none;">
+                                {% csrf_token %}
+                                <input type="hidden" name="role" id="{{ panel_id }}-role-value-{{ grant.id }}">
+                            </form>
+                            <form method="post" action="{% url delete_url_name grant.id %}" id="{{ panel_id }}-remove-form-{{ grant.id }}" style="display:none;">
+                                {% csrf_token %}
+                            </form>
+                            <ul>
+                                <li class="dropdown" style="list-style:none;position:absolute">
+                                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" aria-expanded="true"
+                                       label="Actions" name="dropdown-{{ panel_id }}-actions">&nbsp;<b class="fa-solid fa-ellipsis-vertical"></b>&nbsp;</a>
+                                    <ul class="dropdown-menu">
+                                        <li class="dropdown-header">{% trans "Change role to" %}</li>
+                                        {% for role in roles %}
+                                            {% if role.id != grant.role_id %}
+                                            <li>
+                                                <a name="changeRole" href="#"
+                                                   onclick="document.getElementById('{{ panel_id }}-role-value-{{ grant.id }}').value='{{ role.id }}'; document.getElementById('{{ panel_id }}-role-form-{{ grant.id }}').submit(); return false;">
+                                                    {{ role.name }}
+                                                </a>
+                                            </li>
+                                            {% endif %}
+                                        {% endfor %}
+                                        <li role="separator" class="divider"></li>
+                                        <li>
+                                            <a name="removeGrant" href="#"
+                                               onclick="if (confirm('{% trans "Remove this grant?" %}')) { document.getElementById('{{ panel_id }}-remove-form-{{ grant.id }}').submit(); } return false;">
+                                                <i class="fa-solid fa-trash"></i> {% trans "Remove" %}
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        </td>
+                        {% endif %}
+                        {# Both sides stringify usefully: Dojo_User.__str__ is "First Last (username)", Dojo_Group.__str__ is its name. #}
+                        <td name="rbac_grant_subject">{{ subject }}</td>
+                        <td name="rbac_grant_role">{{ grant.role.name }}</td>
+                    </tr>
+                    {% endwith %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="panel-body">
+            <small class="text-muted"><em>{{ empty_message }}</em></small>
+        </div>
+    {% endif %}
+</div>

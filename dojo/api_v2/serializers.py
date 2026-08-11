@@ -285,6 +285,28 @@ class MetaMainSerializer(serializers.Serializer):
         return data
 
 
+# RBAC serializers (INTEGRATIONS_ROADMAP.md §7.7) — the four blocks below
+# tagged "prefetcher discovery" (authorization, group, product, product_type).
+# They are re-exported here purely so the prefetcher can find them:
+# dojo/api_v2/prefetch/prefetcher.py builds its model -> serializer map with
+# inspect.getmembers() over THIS module, so a ModelSerializer that is not a
+# member here silently drops out of every ?prefetch= response (AGENTS.md
+# Phase 6). DojoGroupSerializer in particular is what makes
+# Product.authorization_groups / Product_Type.authorization_groups renderable
+# at all — together with the matching Dojo_Group policy in
+# dojo/api_v2/prefetch/registrations.py, which is the second, separate gate.
+#
+# The v3 Asset*/Organization* twins of the member/group serializers are
+# deliberately NOT re-exported: they cover the same four models
+# (Product_Member / Product_Group / Product_Type_Member / Product_Type_Group)
+# and the map is keyed by model, so importing both would make which serializer
+# renders a prefetched grant row depend on getmembers() ordering. Same reason
+# AssetSerializer / OrganizationSerializer are already absent from this module.
+from dojo.authorization.api.serializer import (  # noqa: E402
+    GlobalRoleSerializer,  # noqa: F401 -- prefetcher discovery
+    RoleSerializer,  # noqa: F401 -- prefetcher discovery
+)
+
 # Engagement serializers live in dojo/engagement/api/serializer.py.
 # EngagementSerializer is re-exported here because ReportGenerateSerializer and
 # RiskAcceptanceSerializer (below) still reference it. The other engagement
@@ -296,6 +318,10 @@ from dojo.engagement.api.serializer import (  # noqa: E402, F401 -- backward com
 from dojo.file_uploads.api.serializer import (  # noqa: E402, F401 -- re-export; prefetcher + lazy consumers in finding/test/engagement
     FileSerializer,
     RawFileSerializer,
+)
+from dojo.group.api.serializer import (  # noqa: E402
+    DojoGroupMemberSerializer,  # noqa: F401 -- prefetcher discovery
+    DojoGroupSerializer,  # noqa: F401 -- prefetcher discovery
 )
 from dojo.note_type.api.serializer import NoteTypeSerializer  # noqa: E402, F401 -- re-export for prefetcher discovery
 from dojo.notes.api.serializer import (  # noqa: E402, F401 -- re-export; prefetcher + RiskAcceptanceToNotesSerializer + lazy consumers
@@ -310,10 +336,16 @@ from dojo.notes.api.serializer import (  # noqa: E402, F401 -- re-export; prefet
 # module (enables prefetching Product_API_Scan_Configuration on the /tests/ endpoint).
 from dojo.product.api.serializer import (  # noqa: E402 -- backward compat
     ProductAPIScanConfigurationSerializer,  # noqa: F401 -- prefetcher discovery
+    ProductGroupSerializer,  # noqa: F401 -- prefetcher discovery
+    ProductMemberSerializer,  # noqa: F401 -- prefetcher discovery
     ProductMetaSerializer,  # noqa: F401 -- backward compat
     ProductSerializer,
 )
-from dojo.product_type.api.serializer import ProductTypeSerializer  # noqa: E402
+from dojo.product_type.api.serializer import (  # noqa: E402
+    ProductTypeGroupSerializer,  # noqa: F401 -- prefetcher discovery
+    ProductTypeMemberSerializer,  # noqa: F401 -- prefetcher discovery
+    ProductTypeSerializer,
+)
 from dojo.user.api.serializer import (  # noqa: E402, F401 -- backward compat + prefetcher discovery
     AddUserSerializer,
     UserContactInfoSerializer,

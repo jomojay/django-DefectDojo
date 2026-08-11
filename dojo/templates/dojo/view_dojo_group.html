@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% comment %}
+Group detail. The Products / Product Types tables are read-only on purpose:
+those grants are created and edited from the Product / Product Type detail
+pages' own RBAC panels (INTEGRATIONS_ROADMAP.md §7.8), never from here - one
+surface owns the grant, so there is one place to audit it.
+{% endcomment %}
+{% block content %}
+    {{ block.super }}
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h3>
+                {{ group.name }}
+                <div class="pull-right">
+                    <a class="btn btn-primary" href="{% url 'edit_group' group.id %}">{% trans "Edit" %}</a>
+                    <a class="btn btn-danger" href="{% url 'delete_group' group.id %}">{% trans "Delete" %}</a>
+                </div>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <p>{{ group.description|default_if_none:"" }}</p>
+        </div>
+    </div>
+
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h4>
+                {% trans "Members" %}
+                <a class="btn btn-primary pull-right" href="{% url 'add_group_member' group.id %}">
+                    <i class="fa-solid fa-plus"></i> {% trans "Add Member" %}
+                </a>
+            </h4>
+        </div>
+        <table class="table table-condensed table-striped">
+            <tr>
+                <th>{% trans "User" %}</th>
+                <th>{% trans "Role" %}</th>
+                <th></th>
+            </tr>
+            {% for member in group_members %}
+                <tr>
+                    <td>{{ member.user.get_full_name|default:member.user.username }}</td>
+                    <td>{{ member.role }}</td>
+                    <td class="nowrap">
+                        <a href="{% url 'edit_group_member' member.id %}" aria-label="{% trans "Edit" %}"><i class="fa-solid fa-pen-to-square"></i></a>
+                        &nbsp;
+                        <a href="{% url 'delete_group_member' member.id %}" aria-label="{% trans "Delete" %}"><i class="fa-solid fa-trash"></i></a>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="3">{% trans "No members." %}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="panel panel-default">
+        <div class="panel-heading"><h4>{{ labels.ORG_PLURAL_LABEL }}</h4></div>
+        <table class="table table-condensed table-striped">
+            <tr>
+                <th>{{ labels.ORG_LABEL }}</th>
+                <th>{% trans "Role" %}</th>
+            </tr>
+            {% for product_type_group in product_types %}
+                <tr>
+                    <td>{{ product_type_group.product_type }}</td>
+                    <td>{{ product_type_group.role }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="2">{% blocktrans with org_plural=labels.ORG_PLURAL_LABEL %}No {{ org_plural }} granted to this group.{% endblocktrans %}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="panel panel-default">
+        <div class="panel-heading"><h4>{{ labels.ASSET_PLURAL_LABEL }}</h4></div>
+        <table class="table table-condensed table-striped">
+            <tr>
+                <th>{{ labels.ASSET_LABEL }}</th>
+                <th>{% trans "Role" %}</th>
+            </tr>
+            {% for product_group in products %}
+                <tr>
+                    <td>{{ product_group.product }}</td>
+                    <td>{{ product_group.role }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="2">{% blocktrans with asset_plural=labels.ASSET_PLURAL_LABEL %}No {{ asset_plural }} granted to this group.{% endblocktrans %}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+{% endblock %}

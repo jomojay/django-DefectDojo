@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block add_styles %}
+    .chosen-container.chosen-container-multi {
+    width: 70% !important;
+    }
+{% endblock %}
+{% comment %}
+Shared "add a role grant" page (INTEGRATIONS_ROADMAP.md §7.8).
+
+One template for all four add flows - product x member, product x group,
+product type x member, product type x group - parameterized by `form`,
+`form_action` and `cancel_url`, in the same spirit as the shared
+_rbac_grant_panel.html partial. The forms differ only in which model they bind
+and which picker they expose, so four copies of this shell would be four copies
+of nothing.
+
+`product_tab` is supplied by the Product-side views and absent on the Product
+Type side, matching how the rest of this codebase splits those two pages.
+{% endcomment %}
+{% block content %}
+    {{ block.super }}
+    <h3>{{ name }}</h3>
+    <form class="form-horizontal" action="{{ form_action }}" method="post">{% csrf_token %}
+        {% include "dojo/form_fields.html" with form=form %}
+        <div class="form-group">
+            <div class="col-sm-offset-2 col-sm-10">
+                <input class="btn btn-primary" type="submit" value="{% trans "Submit" %}"/>
+                <a class="btn btn-secondary" href="{{ cancel_url }}">{% trans "Cancel" %}</a>
+            </div>
+        </div>
+    </form>
+{% endblock %}

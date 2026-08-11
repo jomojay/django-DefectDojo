@@ -13,14 +13,19 @@ from dojo.asset.api import serializers
 from dojo.asset.api.filters import (
     ApiAssetFilter,
     AssetAPIScanConfigurationFilterSet,
+    AssetGroupFilterSet,
+    AssetMemberFilterSet,
 )
 from dojo.authorization import api_permissions as permissions
+from dojo.authorization.models import Product_Group, Product_Member
 from dojo.models import (
     Product,
     Product_API_Scan_Configuration,
 )
 from dojo.product.queries import (
     get_authorized_product_api_scan_configurations,
+    get_authorized_product_groups,
+    get_authorized_product_members,
     get_authorized_products,
 )
 from dojo.utils import async_delete, get_setting
@@ -119,3 +124,59 @@ class AssetViewSet(
         data = report_generate(request, product, options)
         report = ReportGenerateSerializer(data)
         return Response(report.data)
+
+
+# Authorization: object-based
+@extend_schema_view(**schema_with_prefetch())
+class AssetMemberViewSet(
+    PrefetchDojoModelViewSet,
+):
+    serializer_class = serializers.AssetMemberSerializer
+    queryset = Product_Member.objects.none()
+    filter_backends = (DjangoFilterBackend,)
+    filterset_class = AssetMemberFilterSet
+    permission_classes = (
+        IsAuthenticated,
+        permissions.UserHasAssetMemberPermission,
+    )
+
+    def get_queryset(self):
+        return get_authorized_product_members(
+            "view",
+        ).distinct()
+
+    @extend_schema(
+        exclude=True,
+    )
+    def partial_update(self, request, pk=None):
+        # Object authorization won't work if not all data is provided
+        response = {"message": "Patch function is not offered in this path."}
+        return Response(response, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+# Authorization: object-based
+@extend_schema_view(**schema_with_prefetch())
+class AssetGroupViewSet(
+    PrefetchDojoModelViewSet,
+):
+    serializer_class = serializers.AssetGroupSerializer
+    queryset = Product_Group.objects.none()
+    filter_backends = (DjangoFilterBackend,)
+    filterset_class = AssetGroupFilterSet
+    permission_classes = (
+        IsAuthenticated,
+        permissions.UserHasAssetGroupPermission,
+    )
+
+    def get_queryset(self):
+        return get_authorized_product_groups(
+            "view",
+        ).distinct()
+
+    @extend_schema(
+        exclude=True,
+    )
+    def partial_update(self, request, pk=None):
+        # Object authorization won't work if not all data is provided
+        response = {"message": "Patch function is not offered in this path."}
+        return Response(response, status=status.HTTP_405_METHOD_NOT_ALLOWED)

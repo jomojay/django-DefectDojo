@@ -1,5 +1,8 @@
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from dojo.authorization.authorization import user_has_permission
+from dojo.authorization.models import Product_Group, Product_Member
 from dojo.models import DojoMeta, Product, Product_API_Scan_Configuration
 
 
@@ -58,3 +61,102 @@ class ProductSerializer(serializers.ModelSerializer):
     # TODO: maybe extend_schema_field is needed here?
     def get_findings_list(self, obj) -> list[int]:
         return obj.open_findings_list()
+
+
+# ---------------------------------------------------------------------------
+# Role-grant rows on a Product (INTEGRATIONS_ROADMAP.md §7.7).
+#
+# Ported from the pre-3.0 dojo/api_v2/serializers.py (commit db1932c9e). Both
+# validate() bodies are preserved wholesale: with no unique constraint on
+# (product, user) / (product, group) - see roadmap §7.2, migration 0279 is a
+# separate follow-up - the duplicate guard below is the only thing preventing
+# two rows for the same principal, where the highest role would silently win.
+#
+# Permission retarget: Product_Manage_Members / Product_Group_Add -> "manage"
+# (both were Maintainer+), *_Add_Owner -> "own" (Owner only). See the block
+# comment above the UserHas*MemberPermission classes in
+# dojo/authorization/api_permissions.py for why "manage" and not the mechanical
+# permission_to_action() result.
+# ---------------------------------------------------------------------------
+
+
+class ProductMemberSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product_Member
+        fields = "__all__"
+
+    def validate(self, data):
+        if (
+            self.instance is not None
+            and data.get("product") != self.instance.product
+            and not user_has_permission(
+                self.context["request"].user,
+                data.get("product"),
+                "manage",
+            )
+        ):
+            msg = "You are not permitted to add a member to this product"
+            raise PermissionDenied(msg)
+
+        if (
+            self.instance is None
+            or data.get("product") != self.instance.product
+            or data.get("user") != self.instance.user
+        ):
+            members = Product_Member.objects.filter(
+                product=data.get("product"), user=data.get("user"),
+            )
+            if members.count() > 0:
+                msg = "Product_Member already exists"
+                raise ValidationError(msg)
+
+        if data.get("role").is_owner and not user_has_permission(
+            self.context["request"].user,
+            data.get("product"),
+            "own",
+        ):
+            msg = "You are not permitted to add a member as Owner to this product"
+            raise PermissionDenied(msg)
+
+        return data
+
+
+class ProductGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product_Group
+        fields = "__all__"
+
+    def validate(self, data):
+        if (
+            self.instance is not None
+            and data.get("product") != self.instance.product
+            and not user_has_permission(
+                self.context["request"].user,
+                data.get("product"),
+                "manage",
+            )
+        ):
+            msg = "You are not permitted to add a group to this product"
+            raise PermissionDenied(msg)
+
+        if (
+            self.instance is None
+            or data.get("product") != self.instance.product
+            or data.get("group") != self.instance.group
+        ):
+            members = Product_Group.objects.filter(
+                product=data.get("product"), group=data.get("group"),
+            )
+            if members.count() > 0:
+                msg = "Product_Group already exists"
+                raise ValidationError(msg)
+
+        if data.get("role").is_owner and not user_has_permission(
+            self.context["request"].user,
+            data.get("product"),
+            "own",
+        ):
+            msg = "You are not permitted to add a group as Owner to this product"
+            raise PermissionDenied(msg)
+
+        return data

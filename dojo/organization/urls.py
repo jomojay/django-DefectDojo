@@ -48,6 +48,41 @@ if settings.ENABLE_V3_ORGANIZATION_ASSET_RELABEL:
             views.delete_product_type_authorized_user,
             name="delete_product_type_authorized_user",
         ),
+        # RBAC role grants (INTEGRATIONS_ROADMAP.md §7.8). These sit alongside
+        # the authorized_users routes above rather than replacing them (§7.4).
+        # No backwards-compatibility aliases: the routes are new, and
+        # redirect_view() issues a 302 GET that would drop the POST body of the
+        # edit / delete endpoints.
+        re_path(
+            r"^organization/(?P<ptid>\d+)/members/add$",
+            views.add_product_type_member,
+            name="add_product_type_member",
+        ),
+        re_path(
+            r"^organization/member/(?P<memberid>\d+)/edit$",
+            views.edit_product_type_member,
+            name="edit_product_type_member",
+        ),
+        re_path(
+            r"^organization/member/(?P<memberid>\d+)/delete$",
+            views.delete_product_type_member,
+            name="delete_product_type_member",
+        ),
+        re_path(
+            r"^organization/(?P<ptid>\d+)/groups/add$",
+            views.add_product_type_group,
+            name="add_product_type_group",
+        ),
+        re_path(
+            r"^organization/group/(?P<groupid>\d+)/edit$",
+            views.edit_product_type_group,
+            name="edit_product_type_group",
+        ),
+        re_path(
+            r"^organization/group/(?P<groupid>\d+)/delete$",
+            views.delete_product_type_group,
+            name="delete_product_type_group",
+        ),
         # TODO: Backwards compatibility; remove after v3 migration is complete
         re_path(r"^product/type$", redirect_view("product_type")),
         re_path(r"^product/type/(?P<ptid>\d+)$", redirect_view("view_product_type")),
@@ -79,6 +114,20 @@ else:
         re_path(r"^product/type/(?P<ptid>\d+)/authorized_users/(?P<user_id>\d+)/delete$",
                 views.delete_product_type_authorized_user,
                 name="delete_product_type_authorized_user"),
+        # RBAC role grants (INTEGRATIONS_ROADMAP.md §7.8), alongside the
+        # authorized_users routes above rather than replacing them (§7.4).
+        re_path(r"^product/type/(?P<ptid>\d+)/members/add$", views.add_product_type_member,
+                name="add_product_type_member"),
+        re_path(r"^product/type/member/(?P<memberid>\d+)/edit$", views.edit_product_type_member,
+                name="edit_product_type_member"),
+        re_path(r"^product/type/member/(?P<memberid>\d+)/delete$", views.delete_product_type_member,
+                name="delete_product_type_member"),
+        re_path(r"^product/type/(?P<ptid>\d+)/groups/add$", views.add_product_type_group,
+                name="add_product_type_group"),
+        re_path(r"^product/type/group/(?P<groupid>\d+)/edit$", views.edit_product_type_group,
+                name="edit_product_type_group"),
+        re_path(r"^product/type/group/(?P<groupid>\d+)/delete$", views.delete_product_type_group,
+                name="delete_product_type_group"),
         # Forward compatibility
         re_path(r"^organization$", redirect_view("product_type")),
         re_path(r"^organization/(?P<ptid>\d+)$", redirect_view("view_product_type")),

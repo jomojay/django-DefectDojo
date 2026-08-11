@@ -903,6 +903,21 @@
             "description": "Extra secrets can be created inside of extraSecrets block: ``` DD_SOCIAL_AUTH_AUTH0_SECRET: 'xxx' ```",
             "type": "object"
         },
+        "featureFlags": {
+            "description": "Feature rollout flags, injected into every container that loads dojo.settings.",
+            "type": "object",
+            "properties": {
+                "rbac": {
+                    "description": "Role-based access control enforcement state: off (legacy Authorized Users only), shadow (both resolvers run, the legacy answer is returned, divergence is logged at WARNING), or on (the role-aware resolver is authoritative).",
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "shadow",
+                        "on"
+                    ]
+                }
+            }
+        },
         "gke": {
             "description": "Settings to make running the chart on GKE simpler",
             "type": "object",

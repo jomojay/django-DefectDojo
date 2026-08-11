@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load filter_tags %}
+{% load navigation_tags %}
+{% load authorization_tags %}
+{% comment %}
+Group list, cloned from users.html's filter / paging / sort scaffolding. Reached
+from the sidebar's Users flyout, which only renders the link while
+DD_FEATURE_RBAC is not "off" (INTEGRATIONS_ROADMAP.md §7.8).
+{% endcomment %}
+{% block content %}
+    {{ block.super }}
+    {% trans "Name" as name_label %}
+    <div class="row">
+        <div class="col-md-12">
+            <div class="panel panel-default">
+                <div class="panel-heading tight">
+                    <h3 class="has-filters">
+                        {{ name }}
+                        <div class="dropdown pull-right">
+                            <button id="show-filters" aria-label="Filters" data-toggle="collapse" data-target="#the-filters" class="btn btn-primary toggle-filters"> <i class="fa-solid fa-filter"></i> <i class="caret"></i> </button>
+                            {% if "auth.add_group"|has_configuration_permission:request %}
+                                <a class="btn btn-primary" href="{% url 'add_group' %}">
+                                    <i class="fa-solid fa-plus"></i> {% trans "New Group" %}
+                                </a>
+                            {% endif %}
+                        </div>
+                    </h3>
+                </div>
+                <div id="the-filters" class="is-filters panel-body collapse {% if filtered.form|has_active_filters %}in{% endif %}">
+                    {% include "dojo/filter_snippet.html" with form=filtered.form %}
+                </div>
+            </div>
+            {% if groups %}
+                <div class="clearfix">
+                    {% include "dojo/paging_snippet.html" with page=groups page_size=True %}
+                </div>
+                <div class="panel panel-default table-responsive">
+                    <table id="groups" class="tablesorter-bootstrap table table-condensed table-striped">
+                        <tr>
+                            <th class="nowrap">{% dojo_sort request name_label 'name' 'asc' %}</th>
+                            <th class="nowrap">{% trans "Description" %}</th>
+                            <th class="nowrap">{% trans "Members" %}</th>
+                            <th class="nowrap"></th>
+                        </tr>
+                        {% for group in groups %}
+                            <tr>
+                                <td><a href="{% url 'view_group' group.id %}">{{ group.name }}</a></td>
+                                <td>{{ group.description|default_if_none:"" }}</td>
+                                <td>{{ group.users.count }}</td>
+                                <td class="nowrap">
+                                    <a href="{% url 'edit_group' group.id %}" aria-label="{% trans "Edit" %}"><i class="fa-solid fa-pen-to-square"></i></a>
+                                    &nbsp;
+                                    <a href="{% url 'delete_group' group.id %}" aria-label="{% trans "Delete" %}"><i class="fa-solid fa-trash"></i></a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+                <div class="clearfix">
+                    {% include "dojo/paging_snippet.html" with page=groups %}
+                </div>
+            {% else %}
+                <p class="text-center">{% trans "No groups found." %}</p>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

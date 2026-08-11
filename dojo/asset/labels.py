@@ -102,6 +102,11 @@ class AssetLabelsKeys:
     ASSET_GROUPS_DELETE_SUCCESS_MESSAGE = "asset.groups.delete_success_message"
     ASSET_GROUPS_ADD_ASSETS_LABEL = "asset.groups.add_assets_label"
     ASSET_GROUPS_NUM_ASSETS_LABEL = "asset.groups.num_assets_label"
+    # RBAC role-grant panels on the Asset detail page (INTEGRATIONS_ROADMAP.md §7.8)
+    ASSET_MEMBERS_PANEL_LABEL = "asset.members.panel_label"
+    ASSET_MEMBERS_PANEL_NONE_MESSAGE = "asset.members.panel_none_message"
+    ASSET_GROUPS_PANEL_LABEL = "asset.groups.panel_label"
+    ASSET_GROUPS_PANEL_NONE_MESSAGE = "asset.groups.panel_none_message"
 
 
 # TODO: remove the else: branch once v3 migration is complete
@@ -212,6 +217,10 @@ if settings.ENABLE_V3_ORGANIZATION_ASSET_RELABEL:
         AssetLabelsKeys.ASSET_GROUPS_DELETE_SUCCESS_MESSAGE: _("Asset group deleted successfully."),
         AssetLabelsKeys.ASSET_GROUPS_ADD_ASSETS_LABEL: _("Add Assets"),
         AssetLabelsKeys.ASSET_GROUPS_NUM_ASSETS_LABEL: _("Number of Assets"),
+        AssetLabelsKeys.ASSET_MEMBERS_PANEL_LABEL: _("Asset Members"),
+        AssetLabelsKeys.ASSET_MEMBERS_PANEL_NONE_MESSAGE: _("No users hold a role on this Asset."),
+        AssetLabelsKeys.ASSET_GROUPS_PANEL_LABEL: _("Asset Groups"),
+        AssetLabelsKeys.ASSET_GROUPS_PANEL_NONE_MESSAGE: _("No groups hold a role on this Asset."),
     }
 else:
     labels = {
@@ -320,4 +329,8 @@ else:
         AssetLabelsKeys.ASSET_GROUPS_DELETE_SUCCESS_MESSAGE: _("Product group deleted successfully."),
         AssetLabelsKeys.ASSET_GROUPS_ADD_ASSETS_LABEL: _("Add Products"),
         AssetLabelsKeys.ASSET_GROUPS_NUM_ASSETS_LABEL: _("Number of Products"),
+        AssetLabelsKeys.ASSET_MEMBERS_PANEL_LABEL: _("Product Members"),
+        AssetLabelsKeys.ASSET_MEMBERS_PANEL_NONE_MESSAGE: _("No users hold a role on this Product."),
+        AssetLabelsKeys.ASSET_GROUPS_PANEL_LABEL: _("Product Groups"),
+        AssetLabelsKeys.ASSET_GROUPS_PANEL_NONE_MESSAGE: _("No groups hold a role on this Product."),
     }

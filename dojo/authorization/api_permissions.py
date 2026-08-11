@@ -16,6 +16,7 @@ from dojo.authorization.authorization import (
     user_has_permission,
     user_is_superuser_or_global_owner,
 )
+from dojo.authorization.models import Dojo_Group
 from dojo.importers.auto_create_context import AutoCreateContextManager
 from dojo.location.models import Location
 from dojo.models import (
@@ -664,6 +665,248 @@ class UserHasOrganizationPermission(permissions.BasePermission):
             obj,
             "view",
             "edit",
+            "delete",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Role-grant surfaces: Dojo_Group / Dojo_Group_Member and the member / group
+# grant rows on Product and Product_Type, plus their v3 Asset / Organization
+# twins (INTEGRATIONS_ROADMAP.md §7.7).
+#
+# Ported from the six (plus four alias) UserHas*Permission classes deleted at
+# the OS 3.0 split (db1932c9e:dojo/api_v2/permissions.py). The shape is
+# unchanged; only the permission vocabulary is retargeted from the fine-grained
+# ``Permissions`` enum onto this fork's ``Action`` strings. That retarget is NOT
+# the mechanical ``permission_to_action()`` mapping, and deliberately so:
+#
+#   old permission              old roles       Action used here
+#   -------------------------   -------------   ----------------
+#   *_Manage_Members            Maintainer+     "manage"
+#   *_Member_Delete             Maintainer+     "delete"   (Maintainer+ too)
+#   *_Group_Add / _Edit         Maintainer+     "manage"
+#   *_Group_Delete              Maintainer+     "delete"
+#   *_Add_Owner                 Owner only      "own"      (serializers)
+#
+# The two that would be wrong mechanically are ``*_Group_Add`` and
+# ``*_Group_Edit``: ``permission_to_action()`` resolves them to "add" / "edit",
+# which the corrected matrix grants to **Writer** — so a Writer could hand a
+# group access to a product. "manage" restores the Maintainer+ floor the
+# pre-3.0 matrix had.
+#
+# The Dojo_Group / Dojo_Group_Member entries mirror the actions already
+# declared for the equivalent UI routes in
+# ``dojo.authorization.url_permissions.URL_PERMISSIONS`` (PR 4), so the UI and
+# the API cannot disagree about who may administer a group.
+# ---------------------------------------------------------------------------
+
+
+class UserHasDojoGroupPermission(permissions.BasePermission):
+
+    """
+    Groups are gated on the Django *configuration* permissions
+    ``auth.view_group`` / ``auth.add_group`` on top of the per-object check.
+
+    This is what stops group membership — and therefore user identity and
+    email — leaking to any authenticated account: a group listing exposes its
+    members. ``dojo/group/queries.py:get_authorized_groups()`` keys on the same
+    two permissions, so the list queryset and this gate agree.
+    """
+
+    def has_permission(self, request, view):
+        if request.method == "GET":
+            return user_has_configuration_permission(
+                request.user, "auth.view_group",
+            )
+        if request.method == "POST":
+            return user_has_configuration_permission(
+                request.user, "auth.add_group",
+            )
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        if request.method == "GET":
+            # Users need to be authorized to view groups in general and only the groups they are a member of
+            # because with the group they can see user information that might
+            # be considered as confidential
+            return user_has_configuration_permission(
+                request.user, "auth.view_group",
+            ) and user_has_permission(
+                request.user, obj, "view",
+            )
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "edit",
+            "delete",
+        )
+
+
+class UserHasDojoGroupMemberPermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request, Dojo_Group, "group", "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasProductMemberPermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request, Product, "product", "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasAssetMemberPermission(permissions.BasePermission):
+
+    """v3 twin of ``UserHasProductMemberPermission``: same rules, ``asset`` payload key."""
+
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request, Product, "asset", "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasProductGroupPermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request, Product, "product", "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasAssetGroupPermission(permissions.BasePermission):
+
+    """v3 twin of ``UserHasProductGroupPermission``: same rules, ``asset`` payload key."""
+
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request, Product, "asset", "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasProductTypeMemberPermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request,
+            Product_Type,
+            "product_type",
+            "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasOrganizationMemberPermission(permissions.BasePermission):
+
+    """v3 twin of ``UserHasProductTypeMemberPermission``: ``organization`` payload key."""
+
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request,
+            Product_Type,
+            "organization",
+            "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasProductTypeGroupPermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request,
+            Product_Type,
+            "product_type",
+            "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
+            "delete",
+        )
+
+
+class UserHasOrganizationGroupPermission(permissions.BasePermission):
+
+    """v3 twin of ``UserHasProductTypeGroupPermission``: ``organization`` payload key."""
+
+    def has_permission(self, request, view):
+        return check_post_permission(
+            request,
+            Product_Type,
+            "organization",
+            "manage",
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return check_object_permission(
+            request,
+            obj,
+            "view",
+            "manage",
             "delete",
         )
 

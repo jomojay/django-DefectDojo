@@ -23,6 +23,25 @@ x-sso-environment: &sso-environment
   DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS: "${DD_SOCIAL_AUTH_AZUREAD_WHITELISTED_DOMAINS:-}"
   DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS: "${DD_SOCIAL_AUTH_REDIRECT_IS_HTTPS:-False}"
 
+# Role-based access control rollout flag, shared by every container that loads dojo.settings for
+# the same reason as the block above: the celery workers and the initializer resolve permissions
+# too, and a flag that only reached the web tier would make them disagree with it.
+#
+#   off    - legacy authorized_users / is_staff authorization only, exactly the pre-RBAC engine.
+#   shadow - default. Both resolvers run on every object-level check, the legacy answer is still
+#            the one returned, and any disagreement is logged at WARNING with the user, the object
+#            type and pk, the permission, and both answers. Nobody gains or loses access in this
+#            state; it exists so the divergences show up in the log before they show up as
+#            support tickets. Follow them with:
+#              docker-compose logs -f uwsgi celeryworker | grep 'RBAC shadow divergence'
+#   on     - the role-aware resolver becomes authoritative for both object-level checks and
+#            queryset filtering. Flip to this only after the shadow log has been reviewed.
+#
+# Anything else is treated as "off" (fail closed). Set it per environment (or in a .env file);
+# unlike the SSO block above this is behaviour configuration, not a secret.
+x-rbac-environment: &rbac-environment
+  DD_FEATURE_RBAC: "${DD_FEATURE_RBAC:-shadow}"
+
 services:
   nginx:
     build:
@@ -70,7 +89,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
-      <<: *sso-environment
+      <<: [*sso-environment, *rbac-environment]
     volumes:
         - type: bind
           source: ./docker/extra_settings
@@ -92,7 +111,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
-      <<: *sso-environment
+      <<: [*sso-environment, *rbac-environment]
     volumes:
         - type: bind
           source: ./docker/extra_settings
@@ -113,7 +132,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
-      <<: *sso-environment
+      <<: [*sso-environment, *rbac-environment]
     volumes:
         - type: bind
           source: ./docker/extra_settings
@@ -135,7 +154,7 @@ services:
       DD_SECRET_KEY: "${DD_SECRET_KEY:-hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq}"
       DD_CREDENTIAL_AES_256_KEY: "${DD_CREDENTIAL_AES_256_KEY:-&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw}"
       DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT:-30}"
-      <<: *sso-environment
+      <<: [*sso-environment, *rbac-environment]
     volumes:
         - type: bind
           source: ./docker/extra_settings

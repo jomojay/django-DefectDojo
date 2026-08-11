@@ -346,8 +346,20 @@
     </div>
     {% endblock authorized_users_panel %}
 
-    {% block rbac_members_panel %}{% endblock %}
-    {% block rbac_groups_panel %}{% endblock %}
+    {% block rbac_members_panel %}
+    {% feature_rbac_enabled as rbac_enabled %}
+    {% trans "User" as rbac_user_label %}
+    {% if rbac_enabled %}
+        {% include "dojo/_rbac_grant_panel.html" with panel_id="rbac-asset-members" panel_title=labels.ASSET_MEMBERS_PANEL_LABEL grants=rbac_members subject_attr="user" subject_label=rbac_user_label add_url=rbac_add_member_url add_label=labels.ASSET_USERS_MEMBER_ADD_LABEL add_dom_id="addProductMember" empty_message=labels.ASSET_MEMBERS_PANEL_NONE_MESSAGE edit_url_name="edit_product_member" delete_url_name="delete_product_member" roles=rbac_roles can_manage=rbac_can_manage_members %}
+    {% endif %}
+    {% endblock rbac_members_panel %}
+    {% block rbac_groups_panel %}
+    {% feature_rbac_enabled as rbac_enabled %}
+    {% trans "Group" as rbac_group_label %}
+    {% if rbac_enabled %}
+        {% include "dojo/_rbac_grant_panel.html" with panel_id="rbac-asset-groups" panel_title=labels.ASSET_GROUPS_PANEL_LABEL grants=rbac_groups subject_attr="group" subject_label=rbac_group_label add_url=rbac_add_group_url add_label=labels.ASSET_GROUPS_ADD_LABEL add_dom_id="addProductGroup" empty_message=labels.ASSET_GROUPS_PANEL_NONE_MESSAGE edit_url_name="edit_product_group" delete_url_name="delete_product_group" roles=rbac_roles can_manage=rbac_can_manage_groups %}
+    {% endif %}
+    {% endblock rbac_groups_panel %}
 
 </div>
 <!-- Meta Data -->

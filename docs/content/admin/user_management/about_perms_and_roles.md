@@ -1,13 +1,12 @@
 ---
 title: "Permissions in DefectDojo"
-description: "Summary of all DefectDojo Pro permission options, in detail"
+description: "Summary of all DefectDojo permission options, in detail"
 weight: 2
-audience: pro
 aliases:
   - /en/customize_dojo/user_management/about_perms_and_roles
 ---
 
-> **DefectDojo Pro feature.** The Members / Groups / Global Roles RBAC system described on this page is part of DefectDojo Pro. Open-source DefectDojo uses the [Authorized Users](../os__authorized_users/) model — see that page for open-source access control, and the [3.0 upgrade notes](/releases/os_upgrading/3.0/#authorized-users-panel-replaces-membersgroups-under-legacy-authorization) if you're moving between editions.
+> **Pro feature upstream, enabled here.** The Members / Groups / Global Roles RBAC system described on this page ships only in DefectDojo Pro upstream. This installation reactivates that system in the open-source build, so this page applies here. Whether the roles are actually **enforced** is controlled by the `DD_FEATURE_RBAC` setting: `shadow` (the default) evaluates the roles and logs what they *would* decide without changing anyone's access, and `on` makes them authoritative. Role-based grants sit **alongside** the [Authorized Users](../os__authorized_users/) model rather than replacing it — a user's access is the union of both. See the [3.0 upgrade notes](/releases/os_upgrading/3.0/#authorized-users-panel-replaces-membersgroups-under-legacy-authorization) for the upstream history.
 
 If you have a team of users working in DefectDojo, it's important to set up Role\-Based Access Control (RBAC) appropriately so that users can only access specific data. Security data is highly sensitive, and DefectDojo's options for access control allow you to be specific about each team member’s access to information.
 

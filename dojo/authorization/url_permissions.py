@@ -1,5 +1,13 @@
 from django.conf import settings
 
+from dojo.authorization.models import (
+    Dojo_Group,
+    Dojo_Group_Member,
+    Product_Group,
+    Product_Member,
+    Product_Type_Group,
+    Product_Type_Member,
+)
 from dojo.location.models import Location
 from dojo.models import (
     App_Analysis,
@@ -289,6 +297,64 @@ URL_PERMISSIONS = {
     "view_empty_survey": [("config", "dojo.view_engagement_survey")],
     "delete_empty_questionnaire": [("config", "dojo.delete_engagement_survey")],
     "delete_general_questionnaire": [("config", "dojo.delete_engagement_survey")],
+
+    # -----------------------------------------------------------------------
+    # Groups (dojo/group/ui/views.py  ->  dojo/group/ui/urls.py)
+    #
+    # Group administration is a configuration-level capability, expressed with
+    # the same auth.* Django permissions dojo/group/queries.py already keys on
+    # (and which user_has_configuration_permission() grants to staff and
+    # superusers outright).
+    #
+    # The per-object entries resolve through authorization._authorized_for()'s
+    # Dojo_Group / Dojo_Group_Member branches. Those are coarse today - no
+    # per-object grant exists for a group, so they reduce to staff/superuser
+    # (plus a Global_Role under DD_FEATURE_RBAC=on, plus a self-referencing
+    # membership row). That is deliberate and unchanged by this module; see the
+    # comments in authorization.py and INTEGRATIONS_ROADMAP.md §7.5.
+    #
+    # "groups" (the list page) is gated on auth.view_group exactly as the
+    # pre-3.0 module was; its queryset is separately narrowed by
+    # get_authorized_groups(), so the page can never list a group the viewer
+    # is not authorized for.
+    # -----------------------------------------------------------------------
+    "groups": [("config", "auth.view_group")],
+    "add_group": [("config", "auth.add_group")],
+    "view_group": [("object", Dojo_Group, "view", "group_id")],
+    "edit_group": [("object", Dojo_Group, "edit", "group_id")],
+    "delete_group": [("object", Dojo_Group, "delete", "group_id")],
+    "add_group_member": [("object", Dojo_Group, "manage", "gid")],
+    "edit_group_member": [("object", Dojo_Group_Member, "manage", "mid")],
+    "delete_group_member": [("object", Dojo_Group_Member, "delete", "mid")],
+
+    # -----------------------------------------------------------------------
+    # RBAC role grants on a Product / Product Type
+    # (dojo/product/ui/views.py -> dojo/asset/urls.py,
+    #  dojo/product_type/ui/views.py -> dojo/organization/urls.py)
+    #
+    # Declared here so the whole grant surface is auditable in one table, per
+    # INTEGRATIONS_ROADMAP.md §7.5. Each view *additionally* re-checks the
+    # payload-specific rule the URL cannot express - whether the role being
+    # granted is Owner - which is the actual privilege-escalation boundary.
+    #
+    # The edit/delete entries key on the grant row, not the container:
+    # authorization._authorized_for() resolves a member/group row to the
+    # Product / Product_Type it grants access to, and adds the pre-3.0
+    # self-removal carve-out (Delete only) for rows referencing the requester.
+    # -----------------------------------------------------------------------
+    "add_product_member": [("object", Product, "manage", "pid")],
+    "edit_product_member": [("object", Product_Member, "manage", "memberid")],
+    "delete_product_member": [("object", Product_Member, "delete", "memberid")],
+    "add_product_group": [("object", Product, "manage", "pid")],
+    "edit_product_group": [("object", Product_Group, "manage", "groupid")],
+    "delete_product_group": [("object", Product_Group, "delete", "groupid")],
+
+    "add_product_type_member": [("object", Product_Type, "manage", "ptid")],
+    "edit_product_type_member": [("object", Product_Type_Member, "manage", "memberid")],
+    "delete_product_type_member": [("object", Product_Type_Member, "delete", "memberid")],
+    "add_product_type_group": [("object", Product_Type, "manage", "ptid")],
+    "edit_product_type_group": [("object", Product_Type_Group, "manage", "groupid")],
+    "delete_product_type_group": [("object", Product_Type_Group, "delete", "groupid")],
 }
 
 

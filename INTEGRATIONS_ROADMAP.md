@@ -23,6 +23,8 @@ We're adding Microsoft Entra ID **OIDC** single sign-on and a **SolarWinds Servi
 
 ## 2. Why This Doesn't Require Rebuilding DefectDojo Pro's RBAC
 
+> **Superseded 2026-08-11 — kept for the record, not as current design.** This section explains why the SSO epic shipped without any RBAC work, and it was right about that. It is no longer a statement about where this fork stands: Epic 0 (§7) reactivated the dormant RBAC schema, and as of PR 7 the engine, REST API and UI panels are all in the tree with `DD_FEATURE_RBAC` defaulting to `shadow`. Read §7 for the design that is actually live. Two specific claims below are now historical: "there are no roles, no groups, and no global roles" describes upstream open-source, not this fork; and the conclusion's "that was sufficient to ship SSO" is scoped to the SSO delivery, not to the fork's access model today.
+
 Upstream's own documentation confirms two things that shape this whole plan:
 
 > "Single Sign-On is a **DefectDojo Pro** feature. As of DefectDojo 3.0, the SSO surface — SAML, OIDC, and the bundled OAuth providers — is available only in DefectDojo Pro." — `docs/content/admin/sso/_index.md`
@@ -35,7 +37,7 @@ So: SSO was removed from open-source DefectDojo org-wide at the 3.0 release (not
 - `dojo/authorization/authorization.py` implements authorization purely against `is_superuser` / `is_staff` / `authorized_users` — the RBAC shells are never consulted.
 - The UI already exists: "Add Authorized User" panel on the Product and Product Type detail pages (`dojo/product/ui/views.py:1666`, `add_product_authorized_users`).
 
-**Conclusion (superseded 2026-08-09, reasoning above still holds — see §7):** an SSO-provisioned user is just an ordinary `Dojo_User` row, immediately assignable through the Authorized Users panel, and that was sufficient to ship SSO without any RBAC work — nothing above was wrong. What changed is a downstream requirement: `authorized_users` is all-or-nothing per Product/Product Type (no read-only tier), which blocks granting stakeholders read-only access while dev teams get edit access. That's not an SSO problem — it surfaced *because* SSO made onboarding easy enough to expose the gap — and it doesn't require Entra group-claim sync (Epic 1.5 stays deferred, untouched). It requires the RBAC schema this fork already has sitting inert in its database (§7). Epic 0 is now active.
+**Conclusion (superseded — see the note at the top of this section and §7; the reasoning above still holds for what it claimed at the time):** an SSO-provisioned user is just an ordinary `Dojo_User` row, immediately assignable through the Authorized Users panel, and that was sufficient to ship SSO without any RBAC work — nothing above was wrong. What changed is a downstream requirement: `authorized_users` is all-or-nothing per Product/Product Type (no read-only tier), which blocks granting stakeholders read-only access while dev teams get edit access. That's not an SSO problem — it surfaced *because* SSO made onboarding easy enough to expose the gap — and it doesn't require Entra group-claim sync (Epic 1.5 stays deferred, untouched). It requires the RBAC schema this fork already has sitting inert in its database (§7). Epic 0 is now active.
 
 ---
 
@@ -47,8 +49,8 @@ So: SSO was removed from open-source DefectDojo org-wide at the 3.0 release (not
 | 2 | Library | **`social-auth-app-django`** with the `social_core.backends.azuread_tenant.AzureADTenantOAuth2` backend — re-adopting upstream's own pre-3.0 approach |
 | 3 | Local login | **Stays available to everyone**, not restricted to a break-glass account. `ModelBackend` remains second in `AUTHENTICATION_BACKENDS`. |
 | 4 | Provisioning | **Just-in-time** on first SSO login, restricted to the configured tenant/domain (per-deployment, env-driven), new users get zero privilege by default |
-| 5 | Role assignment | **Manual**, via the existing Authorized Users panels. Automated Entra-group sync deferred (Epic 1.5). |
-| 6 | Authorization schema | **No RBAC replica for this delivery** (§2). Revisit only if group-sync or per-product role granularity becomes a hard requirement. |
+| 5 | Role assignment | **Manual**, via the Authorized Users, Members and Groups panels. Unchanged by Epic 0 — reactivating RBAC added role granularity, not automation. Automated Entra-group sync stays deferred (Epic 1.5). |
+| 6 | Authorization schema | ~~No RBAC replica for this delivery (§2)~~ — **revised 2026-08-09**: per-product role granularity did become a hard requirement, which is exactly the revisit condition this row named. The dormant RBAC schema is reactivated in **Epic 0 (§7)**, gated behind `DD_FEATURE_RBAC`. |
 | 7 | SolarWinds inbound sync | **Celery-beat polling.** Confirmed: Service Desk's API has zero webhook support (§8). |
 | 8 | Credentials | Secret-store / encrypted-at-rest only, for both integrations — never a plaintext DB column (the JIRA module's `password = CharField` is the anti-pattern being explicitly avoided) |
 
@@ -307,9 +309,11 @@ Forms (`DojoGroupForm`, `Add_Group_MemberForm`, `Add_Product_GroupForm`, `Edit_P
 ### 7.6 Enforcement rollout — three-state flag, dark by default
 
 Mirrors the SSO Epic's own dark-launch pattern (§10, §6.8): `DD_FEATURE_RBAC = off | shadow | on`, read per-call (not bound at import time, or the flag becomes untestable without a process restart).
-- **`off`** (default, PRs 1-4 ship in this state) — today's binary `authorized_users`/`is_staff` logic only, bit-identical to current behavior.
+- **`off`** (the default for PRs 1-6) — today's binary `authorized_users`/`is_staff` logic only, bit-identical to current behavior.
 - **`shadow`** — evaluate both the legacy and role-aware resolvers on every check, return the legacy answer, log any divergence at WARNING (`user, object type+pk, permission, legacy_result, rbac_result`). This is the actual value of the dark launch — every access change surfaces before anyone is affected by it. Run a full business cycle before flipping further. Bound the cost if it matters at scale (sampling, or restrict to mutating requests) — negligible at this deployment's current size.
 - **`on`** — role-aware resolver is authoritative.
+
+**Current default: `shadow`** (changed from `off` by PR 7, 2026-08-11). It is set in three places, each a fallback for the layer below it not being configured: `DD_FEATURE_RBAC=(str, "shadow")` in `dojo/settings/settings.dist.py` is the last-resort default; `docker-compose.yml`'s `x-rbac-environment` anchor passes `${DD_FEATURE_RBAC:-shadow}` into uwsgi, celerybeat, celeryworker and initializer alike; and the Helm chart's `featureFlags.rbac` value (default `shadow`, rendered by the `defectdojo.featureFlagsEnv` helper into the same four workloads) does the same for Kubernetes. The flag must reach the celery containers, not just the web tier — tasks resolve permissions too, and a split-brain flag would make the workers disagree with the web pods about who can see what. The Helm helper rejects any value outside `off|shadow|on` at render time, deliberately, because the settings module fails *closed* to `off` and a typo would otherwise quietly disable enforcement on an instance the operator believes is enforcing.
 
 ### 7.7 REST API
 
@@ -345,7 +349,7 @@ Seven PRs, first four fully dark (`DD_FEATURE_RBAC=off`, zero observable change)
 | 4 | `dojo/group/` module (§7.5) — routes registered but flag-gated | Backend | Yes |
 | 5 | REST API — 12 routes (§7.7) | Backend | Yes |
 | 6 | Frontend panels (§7.8) — both template trees | Frontend | Yes (panels render nothing meaningful until flag is `on`, or gate rendering on the flag too) |
-| 7 | Flip to `shadow` → review divergence log for a full business cycle → flip to `on`; update `docs/content/admin/user_management/`; retire the flag after a bake period | Operator | No |
+| 7 | Default flipped to `shadow` + env/Helm knob (§7.6); `docs/content/admin/user_management/` and `social_pipeline.py` docstrings de-staled; §2 and §9 bookkeeping. **Landed 2026-08-11.** Remaining and deliberately manual: review the divergence log for a business cycle, flip to `on`, retire the flag after a bake period | Operator | No |
 
 Migration `0279` (uniqueness constraints, §7.2) can land any time after PR 1, independently.
 
@@ -360,7 +364,7 @@ Migration `0279` (uniqueness constraints, §7.2) can land any time after PR 1, i
 | **R17** | Fixture-seeded `product_type_member` row (admin as Owner of Product Type 1) activates functionally on cutover. | Called out explicitly in PR 7's description. Harmless (admin is already superuser) but every fresh install reproduces it — a deliberate decision to keep or remove from `dojo/fixtures/product_type.json`, not an oversight. |
 | **R18** | Upstream merge conflict — `dojo/authorization/` is upstream-owned and actively churning; this epic diverges the fork meaningfully. | New logic lands in new files (`dojo/group/`, restored stubs, matrix fix) rather than rewriting `authorization.py` wholesale; keeps the conflict surface small. |
 
-R1 (OS authorization is binary, no granularity) is resolved by this epic and can be marked closed once PR 7 lands. R12 (Pro package installed later, colliding with OSS auth work) is void — confirmed permanently not happening — and can be removed from the active register once this section is read as the current design.
+**Done 2026-08-11 (PR 7):** R1 is marked closed in §9 and R12 has been retired from the active register there, with the reasoning kept as a note beneath the table.
 
 ---
 
@@ -465,7 +469,7 @@ Logic: for each `poll_enabled` instance, call `list_incidents_updated_since(...)
 
 | ID | Risk | Mitigation |
 |---|---|---|
-| R1 | OS authorization is binary per product, no Reader/Writer/Owner granularity | **Closed by Epic 0 (§7)** — was acceptable for the SSO launch, became a hard requirement once stakeholder-read-only/dev-edit access was needed; full reactivation spec in §7, R13-R18 |
+| R1 | ~~OS authorization is binary per product, no Reader/Writer/Owner granularity~~ | **Closed 2026-08-11** by Epic 0 (§7), all seven PRs landed. Was acceptable for the SSO launch, became a hard requirement once stakeholder-read-only/dev-edit access was needed. Reader/Writer/Maintainer/Owner grants are assignable on Products and Product Types individually or by Group; `DD_FEATURE_RBAC` now defaults to `shadow`, and closing this risk in full means flipping it to `on` after the divergence log has been reviewed. Residual risks carried forward as R13-R18. |
 | R2 | Middleware ordering — `SocialAuthExceptionMiddleware` misplaced causes redirect loops | Insert after `AuthenticationMiddleware`, before `LoginRequiredMiddleware` |
 | R3 | `associate_by_email` account-takeover vector | Gate to whitelisted tenant domain + require verified email |
 | R4 | `django-single-session` may evict the pre-auth OAuth/PKCE session | Targeted integration test before enabling `SINGLE_USER_SESSION` alongside SSO |
@@ -476,7 +480,10 @@ Logic: for each `poll_enabled` instance, call `list_incidents_updated_since(...)
 | R9 | `finding.severity` → SolarWinds `priority_id` mapping is tenant-specific | Captured in `severity_priority_map` at config time, never assumed |
 | R10 | Upstream DefectDojo drift — restored SSO code diverges from a future upstream re-add | Review periodically against upstream tags; this is intentionally isolated in `social_pipeline.py`/settings, not scattered |
 | R11 | Repeating JIRA's plaintext-credential anti-pattern for SolarWinds | Code-review gate requiring `dojo_crypto_encrypt` usage |
-| R12 | `pro` package installed later, colliding with any OSS auth work | **Void, confirmed 2026-08-09** — this fork will never install `pro`; Epic 0 (§7) is designed without Pro-coexistence hedging (e.g. `managed=True` flip, `related_name` restoration) as a direct consequence |
+
+**Retired: R12** (`pro` package installed later, colliding with any OSS auth work). Removed from the active register 2026-08-11 per §7.11. Assumption A2 is permanently confirmed false — this fork will never install `pro` — so the risk has no trigger left. Recorded here rather than deleted outright because Epic 0 spent its design budget on the strength of it: `managed=True` on the RBAC models, `related_name="+"` removal, and the reuse of upstream's own table names all assume no Pro package will ever contend for those tables. Reinstating R12 would mean revisiting every one of those.
+
+Epic 0 adds **R13-R18**, listed in §7.11 rather than repeated here.
 
 ---
 
@@ -504,16 +511,20 @@ Logic: for each `poll_enabled` instance, call `list_incidents_updated_since(...)
 - [ ] Staging E2E against real Entra app registration; single-session verification *(PR 5, blocked)*
 
 **Epic 0 (RBAC reactivation, §7):**
-- [ ] Migration `0278` (state-only `managed=True` flip) + `related_name` restoration + companion accessor restoration *(PR 1)*
-- [ ] `sqlmigrate`/`makemigrations --check` verification gate in CI *(PR 1)*
-- [ ] Fixed `roles_permissions.py` matrix (§7.3 table) + `Action.Manage`/`Action.Own` + restored `get_roles_for_permission`/`role_has_permission`/`role_has_global_permission`/`user_is_superuser_or_global_owner` *(PR 2)*
-- [ ] Explicit test: Reader's action set is exactly `{view}` *(PR 2)*
+- [x] Migration `0278` (state-only `managed=True` flip) + `related_name` restoration + companion accessor restoration *(PR 1)* — implemented 2026-08-10, applied and manually verified against the local test stack
+- [ ] `sqlmigrate`/`makemigrations --check` verification gate in CI *(PR 1)* — run manually and passed; not yet wired into an actual CI workflow file
+- [x] Fixed `roles_permissions.py` matrix (§7.3 table) + `Action.Manage`/`Action.Own` + restored `get_roles_for_permission`/`role_has_permission`/`role_has_global_permission`/`user_is_superuser_or_global_owner` *(PR 2)* — implemented 2026-08-10, 96 authorization tests + 202-test regression sweep pass, `ruff` clean
+- [x] Explicit test: Reader's action set is exactly `{view}` *(PR 2)* — `unittests/authorization/test_roles_permissions.py`
+- [ ] **Known gap from PR 1, found while testing PR 2:** `authorization_groups` M2M restored on `Product`/`Product_Type` isn't serialized by the product/asset API serializers, so `test_rest_framework.py`'s prefetch-field assertions fail for `AssetTest`/`OrganizationTest`/`ProductTest`/`ProductTypeTest` (`test_list_prefetch`/`test_detail_prefetch`, 8 tests). Confirmed pre-existing (reproduces with PR 2's changes reverted) and not a regression from PR 2. Fix before Epic 0 is considered complete — either serialize the field or exclude it from the prefetchable-fields check.
 - [ ] Role-aware resolver, remove the `StaffOnly`/`Delete` short-circuit, `authorized_users` coexistence union (§7.4), action-aware request-cached authorization map, `DD_FEATURE_RBAC` flag + dispatcher *(PR 3)*
 - [ ] Coexistence test matrix + `test_authorization_queryset_coverage.py` extended to all flag states *(PR 3)*
-- [ ] `dojo/group/` module: `queries.py`, `signals.py` (verify `auth.Group` mirror wired via `AppConfig.ready()`), `ui/` *(PR 4)*
+- [x] `dojo/group/` module: `queries.py`, `signals.py` (verify `auth.Group` mirror wired via `AppConfig.ready()`), `ui/` *(PR 4)* — implemented 2026-08-10. Group CRUD + membership/role management, routes registered in `url_permissions.py` (no new `@user_is_authorized` call sites), 8 URL names mounted via `dojo/urls.py`, minimal single-tree templates pending PR 6. R16 closed: `unittests/test_group_signals.py` asserts the mirror end to end and was verified to fail (8/8) with the `apps.py` import removed. No `services.py` (pure CRUD); no migration needed (`makemigrations --check` reports "No changes detected"). Deliberately out of scope: `GlobalRoleForm`/`edit_permissions`, product/product-type grant panels, sidebar link.
 - [ ] 12 REST routes across `dojo/group/api/`, `dojo/authorization/api/`, `dojo/product{,_type}/api/`, `dojo/asset/api/`, `dojo/organization/api/` *(PR 5)*
 - [ ] Frontend panels in the pre-wired `rbac_members_panel`/`rbac_groups_panel` blocks, both template trees *(PR 6)*
-- [ ] Flip `DD_FEATURE_RBAC` to `shadow`, review divergence log a full business cycle, flip to `on`; update `docs/content/admin/user_management/` *(PR 7)*
+- [x] Flip the `DD_FEATURE_RBAC` **default** to `shadow` and wire it as a real per-deployment knob — `docker-compose.yml` `x-rbac-environment` anchor and Helm `featureFlags.rbac` (§7.6) *(PR 7)* — implemented 2026-08-11. Verified: settings resolve to `shadow` unset; `helm template` emits `DD_FEATURE_RBAC` into all four workloads and rejects any value outside `off|shadow|on`; 278 authorization/group/API tests pass with the new ambient default, `ruff` clean.
+- [x] De-stale the docs that predate Epic 0: `social_pipeline.py` docstrings, `docs/content/admin/user_management/`, §2's Pro-coexistence reasoning, §9's R1/R12 *(PR 7)* — 2026-08-11
+- [ ] **Operator, manual — not automated by design:** review the shadow divergence log (`RBAC shadow divergence` at WARNING) for a full business cycle, then set `DD_FEATURE_RBAC=on`, then retire the flag after a bake period *(PR 7)*
+- [ ] Decide whether to keep or remove the fixture-seeded `product_type_member` row (admin as Owner of Product Type 1) in `dojo/fixtures/product_type.json` before flipping to `on` — R17. Harmless today (admin is already superuser) but every fresh install reproduces it, and it becomes functionally live at cutover.
 - [ ] Migration `0279` — uniqueness constraints on membership tables *(independent, any time after PR 1)*
 
 **Epic 2 (SolarWinds config + outbound):**

@@ -26,8 +26,9 @@ from django.views import View
 from github import Github
 
 import dojo.finding.helper as finding_helper
-from dojo.authorization.authorization import user_has_permission_or_403
-from dojo.authorization.roles_permissions import Permissions
+from dojo.authorization.authorization import user_has_permission, user_has_permission_or_403
+from dojo.authorization.models import Product_Group, Product_Member, Role
+from dojo.authorization.roles_permissions import FEATURE_RBAC_OFF, Permissions, feature_rbac_state
 from dojo.components.sql_group_concat import Sql_GroupConcat
 from dojo.engagement.ui.filters import (
     EngagementFilter,
@@ -86,6 +87,8 @@ from dojo.models import (
     Test_Type,
 )
 from dojo.product.queries import (
+    get_authorized_groups_for_product,
+    get_authorized_members_for_product,
     get_authorized_products,
 )
 from dojo.product.ui.filters import (
@@ -95,8 +98,12 @@ from dojo.product.ui.filters import (
 )
 from dojo.product.ui.forms import (
     Add_Product_AuthorizedUsersForm,
+    Add_Product_GroupForm,
+    Add_Product_MemberForm,
     DeleteProduct_API_Scan_ConfigurationForm,
     DeleteProductForm,
+    Edit_Product_GroupForm,
+    Edit_Product_MemberForm,
     Product_API_Scan_ConfigurationForm,
     ProductForm,
 )
@@ -302,6 +309,7 @@ def view_product(request, pid):
     product_tab = Product_Tab(prod, title=str(labels.ASSET_LABEL), tab="overview")
     return render(request, "dojo/view_product_details.html", {
         "prod": prod,
+        **_rbac_panel_context(request, prod),
         "product_tab": product_tab,
         "product_metadata": product_metadata,
         "critical": critical,
@@ -1828,3 +1836,218 @@ def delete_api_scan_configuration(request, pid, pascid):
                       "form": form,
                       "product_tab": product_tab,
                   })
+
+
+# ---------------------------------------------------------------------------
+# Role grants on a Product (INTEGRATIONS_ROADMAP.md §7.8)
+#
+# These sit alongside `add_product_authorized_users` / `delete_product_authorized_user`
+# above, deliberately: `authorized_users` remains the flat "just add this one
+# person" grant, and these are the role-based grants (§7.4 — the two union, they
+# do not replace each other).
+#
+# URL-level authorization is declared in
+# `dojo.authorization.url_permissions.URL_PERMISSIONS`. The extra in-view checks
+# are the ones the central table structurally cannot express, because they
+# concern the *payload* (which role is being granted) rather than the URL.
+#
+# Only `add_*` renders a page. Role changes and removals are single-purpose POST
+# endpoints driven from the panel row menus (htmx in the Tailwind tree, a hidden
+# form in the classic tree) and always answer with a redirect, so both trees get
+# the same message-framework feedback from one code path.
+# ---------------------------------------------------------------------------
+
+
+def _rbac_panel_context(request, product):
+    """
+    Context for the two RBAC panels on the product detail page.
+
+    Returns an empty mapping while ``DD_FEATURE_RBAC`` is ``off`` so the page
+    costs exactly what it costs today: the panels are dark until PR 7 flips the
+    flag (INTEGRATIONS_ROADMAP.md §7.6, §7.10). The templates gate on the same
+    flag independently via the ``feature_rbac_enabled`` tag, so a view that
+    forgets this call renders nothing rather than a half-populated panel.
+    """
+    if feature_rbac_state() == FEATURE_RBAC_OFF:
+        return {}
+    # One check for both panels: `Product_Group_Add` would resolve to
+    # Action.Add (a Writer holds it), which is not the bar for handing out
+    # grants. Manage is.
+    can_manage = user_has_permission(request.user, product, Permissions.Product_Manage_Members)
+    return {
+        "rbac_members": get_authorized_members_for_product(product, Permissions.Product_View),
+        "rbac_groups": get_authorized_groups_for_product(product, Permissions.Product_View),
+        "rbac_roles": Role.objects.all().order_by("name"),
+        "rbac_can_manage_members": can_manage,
+        "rbac_can_manage_groups": can_manage,
+        "rbac_add_member_url": reverse("add_product_member", args=(product.id,)),
+        "rbac_add_group_url": reverse("add_product_group", args=(product.id,)),
+    }
+
+
+def _rbac_grant_response(pid):
+    """Every grant mutation lands back on the product detail page."""
+    return HttpResponseRedirect(reverse("view_product", args=(pid,)))
+
+
+def add_product_member(request, pid):
+    product = get_object_or_404(Product, pk=pid)
+    user_has_permission_or_403(request.user, product, Permissions.Product_Manage_Members)
+    page_name = str(labels.ASSET_USERS_MEMBER_ADD_LABEL)
+    memberform = Add_Product_MemberForm(request.POST or None, initial={"product": product.id})
+
+    if request.method == "POST" and memberform.is_valid():
+        # Granting Owner is a privilege escalation and is checked against the
+        # product; the URL-level check cannot see which role the payload asks for.
+        if memberform.cleaned_data["role"].is_owner and not user_has_permission(
+                request.user, product, Permissions.Product_Member_Add_Owner):
+            messages.add_message(
+                request, messages.WARNING,
+                _("You are not permitted to add users as owners."),
+                extra_tags="alert-warning")
+        else:
+            for user in memberform.cleaned_data.get("users", []):
+                # Belt and braces: the form already excludes current members, but
+                # there is no DB uniqueness constraint until migration 0279
+                # (INTEGRATIONS_ROADMAP.md R15) and a duplicate row would let the
+                # higher role silently win.
+                if not Product_Member.objects.filter(product=product, user=user).exists():
+                    Product_Member.objects.create(
+                        product=product, user=user, role=memberform.cleaned_data["role"])
+            messages.add_message(
+                request, messages.SUCCESS,
+                labels.ASSET_USERS_MEMBER_ADD_SUCCESS_MESSAGE,
+                extra_tags="alert-success")
+            return _rbac_grant_response(pid)
+
+    product_tab = Product_Tab(product, title=page_name, tab="settings")
+    return render(request, "dojo/new_rbac_grant.html", {
+        "name": page_name,
+        "form": memberform,
+        "form_action": reverse("add_product_member", args=(pid,)),
+        "cancel_url": reverse("view_product", args=(pid,)),
+        "product_tab": product_tab,
+    })
+
+
+def edit_product_member(request, memberid):
+    member = get_object_or_404(Product_Member, pk=memberid)
+    user_has_permission_or_403(request.user, member.product, Permissions.Product_Manage_Members)
+    if request.method != "POST":
+        raise PermissionDenied
+    memberform = Edit_Product_MemberForm(request.POST, instance=member)
+
+    if not memberform.is_valid():
+        messages.add_message(
+            request, messages.WARNING,
+            _("The role could not be changed: %(errors)s") % {"errors": memberform.errors.as_text()},
+            extra_tags="alert-warning")
+    elif memberform.cleaned_data["role"].is_owner and not user_has_permission(
+            request.user, member.product, Permissions.Product_Member_Add_Owner):
+        messages.add_message(
+            request, messages.WARNING,
+            _("You are not permitted to make users owners."),
+            extra_tags="alert-warning")
+    else:
+        memberform.save()
+        messages.add_message(
+            request, messages.SUCCESS,
+            labels.ASSET_USERS_MEMBER_UPDATE_SUCCESS_MESSAGE,
+            extra_tags="alert-success")
+    return _rbac_grant_response(member.product_id)
+
+
+def delete_product_member(request, memberid):
+    member = get_object_or_404(Product_Member, pk=memberid)
+    if request.method != "POST":
+        raise PermissionDenied
+    # `Product_Member_Delete` maps to the Delete action, which
+    # authorization._authorized_for() also grants for a row referencing the
+    # requesting user — self-removal, deliberately (see the comment there).
+    user_has_permission_or_403(request.user, member, Permissions.Product_Member_Delete)
+    product_id = member.product_id
+    removed_self = member.user_id == request.user.pk
+    member.delete()
+    messages.add_message(
+        request, messages.SUCCESS,
+        labels.ASSET_USERS_MEMBER_DELETE_SUCCESS_MESSAGE,
+        extra_tags="alert-success")
+    if removed_self:
+        # The user may no longer be able to open the page they came from.
+        return HttpResponseRedirect(reverse("product"))
+    return _rbac_grant_response(product_id)
+
+
+def add_product_group(request, pid):
+    product = get_object_or_404(Product, pk=pid)
+    user_has_permission_or_403(request.user, product, Permissions.Product_Manage_Members)
+    page_name = str(labels.ASSET_GROUPS_ADD_LABEL)
+    groupform = Add_Product_GroupForm(request.POST or None, initial={"product": product.id})
+
+    if request.method == "POST" and groupform.is_valid():
+        if groupform.cleaned_data["role"].is_owner and not user_has_permission(
+                request.user, product, Permissions.Product_Group_Add_Owner):
+            messages.add_message(
+                request, messages.WARNING,
+                _("You are not permitted to add groups as owners."),
+                extra_tags="alert-warning")
+        else:
+            for group in groupform.cleaned_data.get("groups", []):
+                if not Product_Group.objects.filter(product=product, group=group).exists():
+                    Product_Group.objects.create(
+                        product=product, group=group, role=groupform.cleaned_data["role"])
+            messages.add_message(
+                request, messages.SUCCESS,
+                labels.ASSET_GROUPS_ADD_SUCCESS_MESSAGE,
+                extra_tags="alert-success")
+            return _rbac_grant_response(pid)
+
+    product_tab = Product_Tab(product, title=page_name, tab="settings")
+    return render(request, "dojo/new_rbac_grant.html", {
+        "name": page_name,
+        "form": groupform,
+        "form_action": reverse("add_product_group", args=(pid,)),
+        "cancel_url": reverse("view_product", args=(pid,)),
+        "product_tab": product_tab,
+    })
+
+
+def edit_product_group(request, groupid):
+    product_group = get_object_or_404(Product_Group, pk=groupid)
+    user_has_permission_or_403(request.user, product_group, Permissions.Product_Manage_Members)
+    if request.method != "POST":
+        raise PermissionDenied
+    groupform = Edit_Product_GroupForm(request.POST, instance=product_group)
+
+    if not groupform.is_valid():
+        messages.add_message(
+            request, messages.WARNING,
+            _("The role could not be changed: %(errors)s") % {"errors": groupform.errors.as_text()},
+            extra_tags="alert-warning")
+    elif groupform.cleaned_data["role"].is_owner and not user_has_permission(
+            request.user, product_group.product, Permissions.Product_Group_Add_Owner):
+        messages.add_message(
+            request, messages.WARNING,
+            _("You are not permitted to make groups owners."),
+            extra_tags="alert-warning")
+    else:
+        groupform.save()
+        messages.add_message(
+            request, messages.SUCCESS,
+            labels.ASSET_GROUPS_UPDATE_SUCCESS_MESSAGE,
+            extra_tags="alert-success")
+    return _rbac_grant_response(product_group.product_id)
+
+
+def delete_product_group(request, groupid):
+    product_group = get_object_or_404(Product_Group, pk=groupid)
+    if request.method != "POST":
+        raise PermissionDenied
+    user_has_permission_or_403(request.user, product_group, Permissions.Product_Group_Delete)
+    product_id = product_group.product_id
+    product_group.delete()
+    messages.add_message(
+        request, messages.SUCCESS,
+        labels.ASSET_GROUPS_DELETE_SUCCESS_MESSAGE,
+        extra_tags="alert-success")
+    return _rbac_grant_response(product_id)

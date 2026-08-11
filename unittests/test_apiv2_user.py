@@ -314,11 +314,12 @@ class UserTest(APITestCase):
         self.assertEqual(r.status_code, 200, r.content[:1000])
         self.assertTrue(User.objects.get(id=user_id).is_staff)
 
-    def test_user_reset_api_token_denies_global_owner_legacy(self):
+    def test_user_reset_api_token_allows_global_owner(self):
         """
-        Legacy: Global_Role(role=Owner) is inert. Resetting another
-        user's API token requires is_superuser; a global-owner who isn't
-        a superuser is treated like any non-privileged user.
+        A Global_Role whose Role.is_owner is set confers system-wide
+        authority, so a global owner who is not a superuser may reset
+        another user's API token (``user_is_superuser_or_global_owner``
+        gates this endpoint via ``IsSuperUserOrGlobalOwner``).
         """
         password = "testTEST1234!@#$"
         r = self.client.post(reverse("user-list"), {
@@ -328,6 +329,7 @@ class UserTest(APITestCase):
         }, format="json")
         self.assertEqual(r.status_code, 201, r.content[:1000])
         global_owner = User.objects.get(username="api-user-global-owner")
+        self.assertFalse(global_owner.is_superuser)
 
         owner_role, _ = Role.objects.get_or_create(name="Owner", defaults={"is_owner": True})
         if not owner_role.is_owner:
@@ -343,6 +345,9 @@ class UserTest(APITestCase):
         }, format="json")
         self.assertEqual(r.status_code, 201, r.content[:1000])
         target_id = r.json()["id"]
+        target_user = User.objects.get(id=target_id)
+        # Tokens aren't created automatically for new users; ensure one exists.
+        old_token = Token.objects.get_or_create(user=target_user)[0].key
 
         # Authenticate as global owner
         token_resp = self.client.post(reverse("api-token-auth"), {
@@ -357,4 +362,53 @@ class UserTest(APITestCase):
 
         url = "{}{}/reset_api_token/".format(reverse("user-list"), target_id)
         r = go_client.post(url)
+        self.assertEqual(r.status_code, 204, r.content[:1000])
+        self.assertNotEqual(old_token, Token.objects.get(user=target_user).key)
+
+    def test_user_reset_api_token_denies_global_non_owner_role(self):
+        """
+        Negative control for the test above: the grant comes from
+        ``Role.is_owner``, not from merely holding a Global_Role. A user
+        with Global_Role(role=Reader) is still refused.
+        """
+        password = "testTEST1234!@#$"
+        r = self.client.post(reverse("user-list"), {
+            "username": "api-user-global-reader",
+            "email": "admin@dojo.com",
+            "password": password,
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content[:1000])
+        global_reader = User.objects.get(username="api-user-global-reader")
+        self.assertFalse(global_reader.is_superuser)
+
+        reader_role, _ = Role.objects.get_or_create(name="Reader", defaults={"is_owner": False})
+        if reader_role.is_owner:
+            reader_role.is_owner = False
+            reader_role.save(update_fields=["is_owner"])
+        Global_Role.objects.update_or_create(user=global_reader, defaults={"role": reader_role})
+
+        # Create target
+        r = self.client.post(reverse("user-list"), {
+            "username": "api-user-reset-3",
+            "email": "admin@dojo.com",
+            "password": "testTEST1234!@#$",
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.content[:1000])
+        target_id = r.json()["id"]
+        target_user = User.objects.get(id=target_id)
+        old_token = Token.objects.get_or_create(user=target_user)[0].key
+
+        # Authenticate as the global reader
+        token_resp = self.client.post(reverse("api-token-auth"), {
+            "username": "api-user-global-reader",
+            "password": password,
+        }, format="json")
+        self.assertEqual(token_resp.status_code, 200, token_resp.content[:1000])
+
+        gr_client = APIClient()
+        gr_client.credentials(HTTP_AUTHORIZATION="Token " + token_resp.json()["token"])
+
+        url = "{}{}/reset_api_token/".format(reverse("user-list"), target_id)
+        r = gr_client.post(url)
         self.assertEqual(r.status_code, 403, r.content[:1000])
+        self.assertEqual(old_token, Token.objects.get(user=target_user).key)

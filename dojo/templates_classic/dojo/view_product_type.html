@@ -205,8 +205,20 @@
                 </div>
                 {% endblock authorized_users_panel %}
 
-                {% block rbac_members_panel %}{% endblock %}
-                {% block rbac_groups_panel %}{% endblock %}
+                {% block rbac_members_panel %}
+                {% feature_rbac_enabled as rbac_enabled %}
+                {% trans "User" as rbac_user_label %}
+                {% if rbac_enabled %}
+                    {% include "dojo/_rbac_grant_panel.html" with panel_id="rbac-org-members" panel_title=labels.ORG_MEMBERS_PANEL_LABEL grants=rbac_members subject_attr="user" subject_label=rbac_user_label add_url=rbac_add_member_url add_label=labels.ORG_USERS_ADD_LABEL add_dom_id="addProductTypeMember" empty_message=labels.ORG_MEMBERS_PANEL_NONE_MESSAGE edit_url_name="edit_product_type_member" delete_url_name="delete_product_type_member" roles=rbac_roles can_manage=rbac_can_manage_members %}
+                {% endif %}
+                {% endblock rbac_members_panel %}
+                {% block rbac_groups_panel %}
+                {% feature_rbac_enabled as rbac_enabled %}
+                {% trans "Group" as rbac_group_label %}
+                {% if rbac_enabled %}
+                    {% include "dojo/_rbac_grant_panel.html" with panel_id="rbac-org-groups" panel_title=labels.ORG_GROUPS_PANEL_LABEL grants=rbac_groups subject_attr="group" subject_label=rbac_group_label add_url=rbac_add_group_url add_label=labels.ORG_GROUPS_ADD_LABEL add_dom_id="addProductTypeGroup" empty_message=labels.ORG_GROUPS_PANEL_NONE_MESSAGE edit_url_name="edit_product_type_group" delete_url_name="delete_product_type_group" roles=rbac_roles can_manage=rbac_can_manage_groups %}
+                {% endif %}
+                {% endblock rbac_groups_panel %}
         </div>
         <div class="col-md-4">
             <div class="panel panel-default-secondary">

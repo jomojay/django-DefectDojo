@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+    {{ block.super }}
+    <h3>{% trans "Remove Group Member" %}</h3>
+    <div class="danger-zone panel panel-danger">
+        <div class="panel-heading">
+            <h3>{% trans "Danger Zone" %}</h3>
+        </div>
+        <form class="" action="{% url 'delete_group_member' memberid %}" method="post">{% csrf_token %}
+            {% include "dojo/form_fields.html" with form=form %}
+            <div class="form-group">
+                <div class="col-sm-offset-2 col-sm-10">
+                    <button class="btn btn-danger" type="submit" name="delete_group_member" value="delete_group_member">
+                        {% trans "Remove" %}
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+{% endblock %}

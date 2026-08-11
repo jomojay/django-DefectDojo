@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+    {{ block.super }}
+    <h3>{% blocktrans with group=to_delete.name %}Delete Group {{ group }}{% endblocktrans %}</h3>
+    <p>{% trans "Deleting a group removes every membership and every product / product type grant it carries." %}</p>
+    <div class="danger-zone panel panel-danger">
+        <div class="panel-heading">
+            <h3>{% trans "Danger Zone" %}</h3>
+        </div>
+        {% if rels|length > 1 %}
+            <ul class="left">{{ rels|unordered_list }}</ul>
+        {% else %}
+            <p class="text-center">{% trans "No relationships found." %}</p>
+        {% endif %}
+        <form class="form-horizontal" method="post">
+            {% csrf_token %}
+            {{ form }}
+            <div class="form-group">
+                <button class="btn btn-danger" type="submit" name="delete_group" value="delete_group">
+                    {% trans "Delete Group" %}
+                </button>
+            </div>
+        </form>
+    </div>
+    <br/>
+{% endblock %}

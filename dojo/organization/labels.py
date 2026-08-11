@@ -51,6 +51,11 @@ class OrganizationLabelsKeys:
     ORG_GROUPS_UPDATE_SUCCESS_MESSAGE = "org.groups.update_success_message"
     ORG_GROUPS_DELETE_LABEL = "org.groups.delete_label"
     ORG_GROUPS_DELETE_SUCCESS_MESSAGE = "org.groups.delete_success_message"
+    # RBAC role-grant panels on the Organization detail page (INTEGRATIONS_ROADMAP.md §7.8)
+    ORG_MEMBERS_PANEL_LABEL = "org.members.panel_label"
+    ORG_MEMBERS_PANEL_NONE_MESSAGE = "org.members.panel_none_message"
+    ORG_GROUPS_PANEL_LABEL = "org.groups.panel_label"
+    ORG_GROUPS_PANEL_NONE_MESSAGE = "org.groups.panel_none_message"
     ORG_CREATE_LABEL = "org.create.label"
     ORG_CREATE_SUCCESS_MESSAGE = "org.create.success_message"
     ORG_READ_LABEL = "org.read.label"
@@ -115,6 +120,10 @@ if settings.ENABLE_V3_ORGANIZATION_ASSET_RELABEL:
         OrganizationLabelsKeys.ORG_GROUPS_UPDATE_SUCCESS_MESSAGE: _("Organization group updated successfully."),
         OrganizationLabelsKeys.ORG_GROUPS_DELETE_LABEL: _("Delete Organization Group"),
         OrganizationLabelsKeys.ORG_GROUPS_DELETE_SUCCESS_MESSAGE: _("Organization group deleted successfully."),
+        OrganizationLabelsKeys.ORG_MEMBERS_PANEL_LABEL: _("Organization Members"),
+        OrganizationLabelsKeys.ORG_MEMBERS_PANEL_NONE_MESSAGE: _("No users hold a role on this Organization."),
+        OrganizationLabelsKeys.ORG_GROUPS_PANEL_LABEL: _("Organization Groups"),
+        OrganizationLabelsKeys.ORG_GROUPS_PANEL_NONE_MESSAGE: _("No groups hold a role on this Organization."),
         OrganizationLabelsKeys.ORG_CREATE_LABEL: _("Add Organization"),
         OrganizationLabelsKeys.ORG_CREATE_SUCCESS_MESSAGE: _("Organization added successfully."),
         OrganizationLabelsKeys.ORG_READ_LABEL: _("View Organization"),
@@ -178,6 +187,10 @@ else:
         OrganizationLabelsKeys.ORG_GROUPS_UPDATE_SUCCESS_MESSAGE: _("Product Type group updated successfully."),
         OrganizationLabelsKeys.ORG_GROUPS_DELETE_LABEL: _("Delete Product Type Group"),
         OrganizationLabelsKeys.ORG_GROUPS_DELETE_SUCCESS_MESSAGE: _("Product Type group deleted successfully."),
+        OrganizationLabelsKeys.ORG_MEMBERS_PANEL_LABEL: _("Product Type Members"),
+        OrganizationLabelsKeys.ORG_MEMBERS_PANEL_NONE_MESSAGE: _("No users hold a role on this Product Type."),
+        OrganizationLabelsKeys.ORG_GROUPS_PANEL_LABEL: _("Product Type Groups"),
+        OrganizationLabelsKeys.ORG_GROUPS_PANEL_NONE_MESSAGE: _("No groups hold a role on this Product Type."),
         OrganizationLabelsKeys.ORG_CREATE_LABEL: _("Add Product Type"),
         OrganizationLabelsKeys.ORG_CREATE_SUCCESS_MESSAGE: _("Product Type added successfully."),
         OrganizationLabelsKeys.ORG_READ_LABEL: _("View Product Type"),

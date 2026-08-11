@@ -291,8 +291,17 @@
                             {% if "auth.view_user"|has_configuration_permission:request %}
                                 <a href="{% url 'users' %}" class="block py-1.5 pl-12 pr-4 text-sm text-gray-400 hover:text-white hover:bg-white/10">{% trans "Users" %}</a>
                             {% endif %}
-                            {# Pro restores the Groups link by overriding this block. #}
-                            {% block groups_submenu_link %}{% endblock %}
+                            {% comment %}
+                            Filled by this fork's RBAC reactivation (INTEGRATIONS_ROADMAP.md §7.8);
+                            upstream leaves it empty for Pro to override. Hidden while
+                            DD_FEATURE_RBAC is "off" so the module stays dark until PR 7.
+                            {% endcomment %}
+                            {% block groups_submenu_link %}
+                                {% feature_rbac_enabled as rbac_enabled %}
+                                {% if rbac_enabled and "auth.view_group"|has_configuration_permission:request %}
+                                    <a href="{% url 'groups' %}" class="block py-1.5 pl-12 pr-4 text-sm text-gray-400 hover:text-white hover:bg-white/10">{% trans "Groups" %}</a>
+                                {% endif %}
+                            {% endblock groups_submenu_link %}
                         </div>
                     </div>
                     {% endif %}

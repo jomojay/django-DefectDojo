@@ -1,7 +1,9 @@
 from django import forms
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dates import MONTHS
 
+from dojo.authorization.models import Dojo_Group, Product_Group, Product_Member
 from dojo.labels import get_labels
 from dojo.models import (
     Dojo_User,
@@ -152,3 +154,87 @@ class DeleteProduct_API_Scan_ConfigurationForm(forms.ModelForm):
     class Meta:
         model = Product_API_Scan_Configuration
         fields = ["id"]
+
+
+# ---------------------------------------------------------------------------
+# Role-grant forms for a Product (INTEGRATIONS_ROADMAP.md §7.5 / §7.8).
+#
+# Ported from the pre-3.0 dojo/forms.py (commit db1932c9e) and landed in the
+# owning module per current convention rather than back in the dojo/forms.py
+# monolith. Only the "add" forms are multi-pick pages; role changes are
+# single-field posts driven from the panel row menus, which is why the Edit
+# variants expose `role` alone instead of a disabled copy of the whole row.
+# ---------------------------------------------------------------------------
+
+
+class Add_Product_MemberForm(forms.ModelForm):
+
+    """
+    Multi-user picker for one product and one role.
+
+    The queryset excludes superusers (they already reach everything), inactive
+    users, and anybody who already holds a grant on this product — the last of
+    which is the only guard against duplicate rows until migration ``0279``
+    adds a uniqueness constraint (INTEGRATIONS_ROADMAP.md R15).
+    """
+
+    users = forms.ModelMultipleChoiceField(queryset=Dojo_User.objects.none(), required=True, label="Users")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["product"].disabled = True
+        self.fields["product"].label = labels.ASSET_LABEL
+        current_members = Product_Member.objects.filter(
+            product=self.initial["product"],
+        ).values_list("user", flat=True)
+        self.fields["users"].queryset = Dojo_User.objects.exclude(
+            Q(is_superuser=True) | Q(id__in=current_members),
+        ).exclude(is_active=False).order_by("first_name", "last_name")
+
+    class Meta:
+        model = Product_Member
+        fields = ["product", "users", "role"]
+
+
+class Edit_Product_MemberForm(forms.ModelForm):
+
+    """One existing ``Product_Member`` row; only the role is editable."""
+
+    class Meta:
+        model = Product_Member
+        fields = ["role"]
+
+
+class Add_Product_GroupForm(forms.ModelForm):
+
+    """Multi-group picker for one product and one role."""
+
+    groups = forms.ModelMultipleChoiceField(queryset=Dojo_Group.objects.none(), required=True, label="Groups")
+
+    def __init__(self, *args, **kwargs):
+        # Lazy: dojo.group.queries pulls in dojo.authorization.authorization,
+        # which this module is otherwise below in the import graph.
+        from dojo.group.queries import get_authorized_groups  # noqa: PLC0415
+
+        super().__init__(*args, **kwargs)
+        self.fields["product"].disabled = True
+        self.fields["product"].label = labels.ASSET_LABEL
+        current_groups = Product_Group.objects.filter(
+            product=self.initial["product"],
+        ).values_list("group", flat=True)
+        # Only groups the user may actually see are offerable — otherwise the
+        # picker leaks the existence (and names) of every group in the install.
+        self.fields["groups"].queryset = get_authorized_groups("view").exclude(id__in=current_groups)
+
+    class Meta:
+        model = Product_Group
+        fields = ["product", "groups", "role"]
+
+
+class Edit_Product_GroupForm(forms.ModelForm):
+
+    """One existing ``Product_Group`` row; only the role is editable."""
+
+    class Meta:
+        model = Product_Group
+        fields = ["role"]

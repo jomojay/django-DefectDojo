@@ -21,10 +21,13 @@ The fine-grained Permissions enum is preserved as a back-compat input
 shape; it maps through permission_to_action() to the legacy Action
 vocabulary.
 
-The role-based helpers (role_has_permission, get_roles_for_permission)
-are inert stubs in the legacy model — they exist only so transitional
-callers don't AttributeError. Tests below verify the stub contract
-(empty/False return, no exceptions).
+The role-based helpers (role_has_permission, get_roles_for_permission,
+role_has_global_permission) are no longer inert stubs — they answer real
+questions about the role → action matrix. They are still not consulted by
+user_has_permission(), so none of the legacy expectations above change.
+Their own contract is covered in test_roles_permissions.py; the tests
+below only pin the fact that they don't leak into the legacy path and
+don't raise on odd input.
 """
 import datetime
 from unittest.mock import Mock, patch
@@ -314,23 +317,33 @@ class TestUserHasConfigurationPermission(LegacyAuthorizationBaseTestCase):
         self.superuser.has_perm.assert_not_called()
 
 
-class TestRoleHelpersAreInertUnderLegacy(DojoTestCase):
+class TestRoleHelpersDoNotAffectLegacyResolution(LegacyAuthorizationBaseTestCase):
 
     """
-    The role-based helpers are stubs under legacy. They exist so
-    transitional callers don't AttributeError; they don't raise.
+    The role helpers are live functions now (see test_roles_permissions.py),
+    but nothing in user_has_permission() consults them yet. These tests pin
+    that separation, and that odd input still doesn't raise.
     """
 
-    def test_role_has_permission_returns_false(self):
-        self.assertFalse(role_has_permission(Roles.Maintainer, Permissions.Product_Edit))
-        self.assertFalse(role_has_permission(9999, Permissions.Product_Edit))  # bogus role: no exception
+    def test_role_helpers_answer_from_the_matrix(self):
+        self.assertTrue(role_has_permission(Roles.Maintainer, Permissions.Product_Edit))
+        self.assertTrue(role_has_global_permission(Roles.Owner, Permissions.Product_Edit))
+        self.assertIn(Roles.Maintainer, get_roles_for_permission(Permissions.Product_Edit))
 
-    def test_role_has_global_permission_returns_false(self):
-        self.assertFalse(role_has_global_permission(Roles.Owner, Permissions.Product_Edit))
+    def test_unknown_role_is_false_not_an_exception(self):
+        self.assertFalse(role_has_permission(9999, Permissions.Product_Edit))
+        self.assertFalse(role_has_global_permission(9999, Permissions.Product_Edit))
 
-    def test_get_roles_for_permission_returns_empty(self):
-        self.assertEqual(get_roles_for_permission(Permissions.Product_Edit), set())
-        self.assertEqual(get_roles_for_permission(9999), set())  # bogus permission: no exception
+    def test_unknown_permission_does_not_raise(self):
+        # permission_to_action() falls back to Action.View for anything it
+        # cannot classify, so this is the read-only role set, not an error.
+        self.assertEqual(get_roles_for_permission(9999), set(Roles))
+
+    def test_role_grants_do_not_leak_into_object_level_checks(self):
+        # A Maintainer-equivalent action set means nothing without a resolver:
+        # an outsider with no authorized_users membership is still denied.
+        self.assertTrue(role_has_permission(Roles.Maintainer, "edit"))
+        self.assertFalse(user_has_permission(self.outsider, self.alpha, "edit"))
 
 
 class TestDojoGroupAuthorization(LegacyAuthorizationBaseTestCase):

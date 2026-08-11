@@ -53,9 +53,23 @@ from dojo.api_v2.views import (
 )
 from dojo.asset.api.views import (
     AssetAPIScanConfigurationViewSet,
+    AssetGroupViewSet,
+    AssetMemberViewSet,
     AssetViewSet,
 )
-from dojo.authorization.roles_permissions import Permissions, permission_to_action
+from dojo.authorization.api.views import GlobalRoleViewSet, RoleViewSet
+from dojo.authorization.authorization import user_is_superuser_or_global_owner
+from dojo.authorization.models import (
+    Dojo_Group,
+    Dojo_Group_Member,
+    Global_Role,
+    Product_Group,
+    Product_Member,
+    Product_Type_Group,
+    Product_Type_Member,
+    Role,
+)
+from dojo.authorization.roles_permissions import Permissions, Roles, permission_to_action
 from dojo.development_environment.api.views import DevelopmentEnvironmentViewSet
 from dojo.endpoint.api.views import EndpointStatusViewSet, EndPointViewSet
 from dojo.engagement.api.views import EngagementViewSet
@@ -64,6 +78,7 @@ from dojo.finding.api.views import (
     FindingTemplatesViewSet,
     FindingViewSet,
 )
+from dojo.group.api.views import DojoGroupMemberViewSet, DojoGroupViewSet
 from dojo.location.api.endpoint_compat import V3EndpointCompatibleViewSet, V3EndpointStatusCompatibleViewSet
 from dojo.location.api.views import LocationFindingReferenceViewSet, LocationProductReferenceViewSet, LocationViewSet
 from dojo.location.models import Location, LocationFindingReference, LocationProductReference
@@ -104,10 +119,21 @@ from dojo.models import (
 )
 from dojo.notifications.api.views import NotificationsViewSet, NotificationWebhooksViewSet
 from dojo.organization.api.views import (
+    OrganizationGroupViewSet,
+    OrganizationMemberViewSet,
     OrganizationViewSet,
 )
-from dojo.product.api.views import ProductAPIScanConfigurationViewSet, ProductViewSet
-from dojo.product_type.api.views import ProductTypeViewSet
+from dojo.product.api.views import (
+    ProductAPIScanConfigurationViewSet,
+    ProductGroupViewSet,
+    ProductMemberViewSet,
+    ProductViewSet,
+)
+from dojo.product_type.api.views import (
+    ProductTypeGroupViewSet,
+    ProductTypeMemberViewSet,
+    ProductTypeViewSet,
+)
 from dojo.risk_acceptance.api.views import RiskAcceptanceViewSet
 from dojo.test.api.views import TestsViewSet, TestTypesViewSet
 from dojo.tool_config.api.views import ToolConfigurationsViewSet
@@ -2855,7 +2881,13 @@ class UsersTest(BaseClass.BaseClassTest):
         }
         self.update_fields = {"first_name": "test changed", "configuration_permissions": [219, 220]}
         self.test_type = TestType.CONFIGURATION_PERMISSIONS
-        self.deleted_objects = 12
+        # 13, not 12: loading dojo_testdata.json's Dojo_Group / Dojo_Group_Member
+        # rows now mirrors them into django.contrib.auth Group membership via
+        # dojo/group/signals.py, so admin gains a User_groups row that cascades.
+        # This is the pre-3.0 value (13 at db1932c9e); it dropped to 12 only
+        # because the OS 3.0 split removed the mirror. Restoring the mirror
+        # restores the count. See INTEGRATIONS_ROADMAP.md §7.5.
+        self.deleted_objects = 13
         BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
 
     def test_create(self):
@@ -3734,6 +3766,665 @@ class OrganizationTest(BaseClass.BaseClassTest):
     # test_create_authorized_owner: legacy authorization has no
     # Global_Role(Owner) concept — create-permission collapses to
     # is_superuser, which test_create is already exercising.
+
+
+# ---------------------------------------------------------------------------
+# RBAC endpoints (INTEGRATIONS_ROADMAP.md §7.7).
+#
+# Twelve routes, not eight: this fork's v3 relabeling keeps a permanent
+# Asset / Organization surface alongside Product / Product_Type over the same
+# four grant tables, so each of those four models is reachable through two
+# fully separate serializer + viewset + permission-class stacks. Both are
+# covered here; a test class per route, not per model.
+#
+# Ported from the pre-3.0 suite (db1932c9e:unittests/test_rest_framework.py)
+# onto the shared BaseClass.MemberEndpointTest base, which already encodes the
+# "PATCH is 405, PUT is 200" contract every grant endpoint has to satisfy.
+# The permission_* attributes are Action strings rather than Permissions enum
+# members, matching what the permission classes now pass to
+# user_has_permission() -- see the block comment above the UserHas*Permission
+# classes in dojo/authorization/api_permissions.py for the retarget table.
+# ---------------------------------------------------------------------------
+
+
+@versioned_fixtures
+class DojoGroupsTest(BaseClass.BaseClassTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Dojo_Group
+        self.endpoint_path = "dojo_groups"
+        self.viewname = "dojo_group"
+        self.viewset = DojoGroupViewSet
+        self.payload = {
+            "name": "Test Group",
+            "description": "Test",
+            "configuration_permissions": [217, 218],
+        }
+        self.update_fields = {"description": "changed", "configuration_permissions": [219, 220]}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Dojo_Group
+        self.permission_update = "edit"
+        self.permission_delete = "delete"
+        self.deleted_objects = 4
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+    # Groups are gated on the auth.view_group / auth.add_group *configuration*
+    # permissions on top of the object check, so an unauthorized user is
+    # refused outright (403) rather than shown an empty list / 404. That gate
+    # is what stops group membership -- i.e. other users' identities -- leaking
+    # to any authenticated account.
+    def test_list_object_not_authorized(self):
+        self.setUp_not_authorized()
+
+        response = self.client.get(self.url, format="json")
+        self.assertEqual(403, response.status_code, response.content[:1000])
+
+    def test_detail_object_not_authorized(self):
+        self.setUp_not_authorized()
+
+        current_objects = self.endpoint_model.objects.all()
+        relative_url = self.url + f"{current_objects[0].id}/"
+        response = self.client.get(relative_url)
+        self.assertEqual(403, response.status_code, response.content[:1000])
+
+    def test_create_object_not_authorized(self):
+        self.setUp_not_authorized()
+
+        response = self.client.post(self.url, self.payload)
+        self.assertEqual(403, response.status_code, response.content[:1000])
+
+    def test_create_group_with_non_configuration_permissions(self):
+        payload = self.payload.copy()
+        payload["configuration_permissions"] = [25, 26]  # these permissions exist but user can not assign them because they are not "configuration_permissions"
+        response = self.client.post(self.url, payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("object does not exist", response.data["message"])
+
+    def test_update_group_with_non_configuration_permissions(self):
+        payload = {}
+        payload["configuration_permissions"] = [25, 26]  # these permissions exist but user can not assign them because they are not "configuration_permissions"
+        response = self.client.patch(self.url + "2/", payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("object does not exist", response.data["message"])
+
+    def test_update_group_other_permissions_will_not_leak_and_stay_untouched(self):
+        Dojo_Group.objects.get(name="Group 1 Testdata").auth_group.permissions.set([218, 220, 26, 28])
+        payload = {}
+        payload["configuration_permissions"] = [217, 218, 219]
+        response = self.client.patch(self.url + "1/", payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["configuration_permissions"], payload["configuration_permissions"])
+        permissions = Dojo_Group.objects.get(name="Group 1 Testdata").auth_group.permissions.all().values_list("id", flat=True)
+        self.assertEqual(set(permissions), set(payload["configuration_permissions"] + [26, 28]))
+        Dojo_Group.objects.get(name="Group 1 Testdata").auth_group.permissions.clear()
+
+
+@versioned_fixtures
+class DojoGroupsUsersTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Dojo_Group_Member
+        self.endpoint_path = "dojo_group_members"
+        self.viewname = "dojo_group_member"
+        self.viewset = DojoGroupMemberViewSet
+        self.payload = {
+            "group": 1,
+            "user": 3,
+            "role": 4,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Dojo_Group_Member
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+    def setUp(self):
+        super().setUp()
+        # The fixture ships one group member, who is group 1's only Owner --
+        # and the last-Owner guard on destroy refuses to remove them. Give the
+        # generic delete/delete_preview tests a non-Owner row to work on; the
+        # guard itself is covered in RBACGrantEndpointInvariantsTest.
+        self.delete_id = Dojo_Group_Member.objects.create(
+            group_id=1, user_id=4, role_id=Roles.Reader,
+        ).pk
+
+
+@versioned_fixtures
+class RolesTest(BaseClass.BaseClassTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Role
+        self.endpoint_path = "roles"
+        self.viewname = "role"
+        self.viewset = RoleViewSet
+        self.test_type = TestType.STANDARD
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+    def test_role_catalogue_is_read_only(self):
+        """
+        The five roles are seeded by migration 0106 and the authority behind
+        each one is a pure function, not data -- so there is deliberately
+        nothing to create, edit, or delete here.
+        """
+        detail_url = f"{self.url}{Role.objects.first().pk}/"
+        for method, url in (
+            (self.client.post, self.url),
+            (self.client.put, detail_url),
+            (self.client.patch, detail_url),
+            (self.client.delete, detail_url),
+        ):
+            response = method(url, {"name": "Nope"})
+            self.assertEqual(405, response.status_code, response.content[:1000])
+
+
+@versioned_fixtures
+class GlobalRolesTest(BaseClass.BaseClassTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Global_Role
+        self.endpoint_path = "global_roles"
+        self.viewname = "global_role"
+        self.viewset = GlobalRoleViewSet
+        self.payload = {
+            "user": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.STANDARD
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+    def test_global_role_requires_exactly_one_of_user_or_group(self):
+        response = self.client.post(self.url, {"role": 2})
+        self.assertEqual(400, response.status_code, response.content[:1000])
+        self.assertIn("must have either user or group", str(response.data))
+
+        response = self.client.post(self.url, {"user": 2, "group": 2, "role": 2})
+        self.assertEqual(400, response.status_code, response.content[:1000])
+        self.assertIn("cannot have both user and group", str(response.data))
+
+    def test_endpoint_is_superuser_only(self):
+        """
+        Global_Role is the privilege-escalation surface of the whole system: a
+        row with ``Role.is_owner`` set confers ownership of every product and
+        product type. A validly authenticated non-superuser must be refused on
+        every verb -- *including* one who already holds a global Owner role,
+        which is the loop that has to stay closed (a global Owner minting more
+        global Owners). This is why the viewset uses IsSuperUser and not
+        IsSuperUserOrGlobalOwner.
+        """
+        detail_url = f"{self.url}{Global_Role.objects.first().pk}/"
+
+        plain = User.objects.get(id=self.NOT_AUTHORIZED_USER_ID)
+        self.assertFalse(plain.is_superuser)
+
+        # A non-superuser who *is* a global Owner. globalWriter starts with a
+        # Global_Role(Writer); promote it to the owner role for this test.
+        global_owner = User.objects.get(username="globalWriter")
+        self.assertFalse(global_owner.is_superuser)
+        owner_role = Role.objects.get(is_owner=True)
+        Global_Role.objects.filter(user=global_owner).update(role=owner_role)
+        self.assertTrue(user_is_superuser_or_global_owner(global_owner))
+
+        for testuser in (plain, global_owner):
+            with self.subTest(user=testuser.username):
+                self._get_client({"id": testuser.id})
+                for method, url, data in (
+                    (self.client.get, self.url, None),
+                    (self.client.get, detail_url, None),
+                    (self.client.post, self.url, self.payload),
+                    (self.client.put, detail_url, self.payload),
+                    (self.client.patch, detail_url, self.update_fields),
+                    (self.client.delete, detail_url, None),
+                ):
+                    response = method(url, data) if data is not None else method(url)
+                    self.assertEqual(403, response.status_code, response.content[:1000])
+
+
+@versioned_fixtures
+class ProductTypeMemberTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Type_Member
+        self.endpoint_path = "product_type_members"
+        self.viewname = "product_type_member"
+        self.viewset = ProductTypeMemberViewSet
+        self.payload = {
+            "product_type": 1,
+            "user": 3,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Type_Member
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class OrganizationMemberTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Type_Member
+        self.endpoint_path = "organization_members"
+        self.viewname = "organization_member"
+        self.viewset = OrganizationMemberViewSet
+        self.payload = {
+            "organization": 1,
+            "user": 3,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Type_Member
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class ProductMemberTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Member
+        self.endpoint_path = "product_members"
+        self.viewname = "product_member"
+        self.viewset = ProductMemberViewSet
+        self.payload = {
+            "product": 3,
+            "user": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Member
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class AssetMemberTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Member
+        self.endpoint_path = "asset_members"
+        self.viewname = "asset_member"
+        self.viewset = AssetMemberViewSet
+        self.payload = {
+            "asset": 3,
+            "user": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Member
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class ProductTypeGroupTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Type_Group
+        self.endpoint_path = "product_type_groups"
+        self.viewname = "product_type_group"
+        self.viewset = ProductTypeGroupViewSet
+        self.payload = {
+            "product_type": 1,
+            "group": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Type_Group
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class OrganizationGroupTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Type_Group
+        self.endpoint_path = "organization_groups"
+        self.viewname = "organization_group"
+        self.viewset = OrganizationGroupViewSet
+        self.payload = {
+            "organization": 1,
+            "group": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Type_Group
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class ProductGroupTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Group
+        self.endpoint_path = "product_groups"
+        self.viewname = "product_group"
+        self.viewset = ProductGroupViewSet
+        self.payload = {
+            "product": 1,
+            "group": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Group
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class AssetGroupTest(BaseClass.MemberEndpointTest):
+    fixtures = ["dojo_testdata.json"]
+
+    def __init__(self, *args, **kwargs):
+        self.endpoint_model = Product_Group
+        self.endpoint_path = "asset_groups"
+        self.viewname = "asset_group"
+        self.viewset = AssetGroupViewSet
+        self.payload = {
+            "asset": 1,
+            "group": 2,
+            "role": 2,
+        }
+        self.update_fields = {"role": 3}
+        self.test_type = TestType.OBJECT_PERMISSIONS
+        self.permission_check_class = Product_Group
+        self.permission_create = "manage"
+        self.permission_update = "manage"
+        self.permission_delete = "delete"
+        self.deleted_objects = 1
+        BaseClass.RESTEndpointTest.__init__(self, *args, **kwargs)
+
+
+@versioned_fixtures
+class RBACGrantEndpointInvariantsTest(DojoAPITestCase):
+
+    """
+    The invariants the twelve routes carry that a generic CRUD base class
+    cannot express.
+
+    These are not decorative validation. With no DB uniqueness on any grant
+    table (INTEGRATIONS_ROADMAP.md §7.2 -- migration 0279 is a deliberately
+    separate follow-up), the serializer duplicate guard is the *only* thing
+    stopping two rows for the same principal, where the higher role would
+    silently win. And losing the last Owner of a product type leaves nobody
+    able to grant the Owner role back short of a superuser.
+    """
+
+    fixtures = ["dojo_testdata.json"]
+
+    # (route, payload for a row that already exists in the fixture)
+    DUPLICATE_CASES = (
+        ("dojo_group_member", {"group": 1, "user": 1, "role": 2}),
+        ("product_member", {"product": 1, "user": 1, "role": 2}),
+        ("asset_member", {"asset": 1, "user": 1, "role": 2}),
+        ("product_type_member", {"product_type": 1, "user": 1, "role": 2}),
+        ("organization_member", {"organization": 1, "user": 1, "role": 2}),
+        ("product_group", {"product": 1, "group": 1, "role": 2}),
+        ("asset_group", {"asset": 1, "group": 1, "role": 2}),
+        ("product_type_group", {"product_type": 1, "group": 1, "role": 2}),
+        ("organization_group", {"organization": 1, "group": 1, "role": 2}),
+    )
+
+    # Every grant route refuses PATCH: object authorization is decided from the
+    # whole payload (which container, which principal, which role), so a
+    # partial one cannot be authorized correctly.
+    PATCH_CASES = (
+        ("dojo_group_member", Dojo_Group_Member),
+        ("product_member", Product_Member),
+        ("asset_member", Product_Member),
+        ("product_type_member", Product_Type_Member),
+        ("organization_member", Product_Type_Member),
+        ("product_group", Product_Group),
+        ("asset_group", Product_Group),
+        ("product_type_group", Product_Type_Group),
+        ("organization_group", Product_Type_Group),
+    )
+
+    def setUp(self):
+        self.login_as_admin()
+
+    def test_duplicate_grant_rows_are_rejected(self):
+        for viewname, payload in self.DUPLICATE_CASES:
+            with self.subTest(route=viewname):
+                url = reverse(f"{viewname}-list")
+                response = self.client.post(url, payload)
+                self.assertEqual(400, response.status_code, response.content[:1000])
+                self.assertIn("already exists", str(response.data))
+
+    def test_patch_is_refused_on_every_grant_route(self):
+        for viewname, model in self.PATCH_CASES:
+            with self.subTest(route=viewname):
+                pk = model.objects.order_by("id").first().pk
+                url = f"{reverse(f'{viewname}-list')}{pk}/"
+                response = self.client.patch(url, {"role": 3})
+                self.assertEqual(405, response.status_code, response.content[:1000])
+
+    def _leave_a_single_owner(self):
+        """Reduce product type 1 to exactly one Owner and return that row."""
+        owners = list(
+            Product_Type_Member.objects.filter(product_type_id=1, role__is_owner=True).order_by("id"),
+        )
+        self.assertGreater(len(owners), 1, "fixture must start with more than one owner")
+        for extra in owners[1:]:
+            extra.delete()
+        return owners[0]
+
+    def test_last_owner_cannot_be_deleted(self):
+        last_owner = self._leave_a_single_owner()
+        for viewname in ("product_type_member", "organization_member"):
+            with self.subTest(route=viewname):
+                url = f"{reverse(f'{viewname}-list')}{last_owner.pk}/"
+                response = self.client.delete(url)
+                self.assertEqual(400, response.status_code, response.content[:1000])
+                self.assertIn("at least one owner", str(response.data))
+                self.assertTrue(
+                    Product_Type_Member.objects.filter(pk=last_owner.pk).exists(),
+                )
+
+    def test_last_owner_cannot_be_demoted(self):
+        last_owner = self._leave_a_single_owner()
+        for viewname, container_field in (
+            ("product_type_member", "product_type"),
+            ("organization_member", "organization"),
+        ):
+            with self.subTest(route=viewname):
+                url = f"{reverse(f'{viewname}-list')}{last_owner.pk}/"
+                payload = {
+                    container_field: last_owner.product_type_id,
+                    "user": last_owner.user_id,
+                    "role": 2,  # Writer -- not an owner
+                }
+                response = self.client.put(url, payload)
+                self.assertEqual(400, response.status_code, response.content[:1000])
+                self.assertIn("at least one owner", str(response.data))
+                last_owner.refresh_from_db()
+                self.assertTrue(last_owner.role.is_owner)
+
+    def test_second_to_last_owner_can_still_be_removed(self):
+        """Positive control: the guard fires on the *last* Owner, not on any Owner."""
+        owners = list(
+            Product_Type_Member.objects.filter(product_type_id=1, role__is_owner=True).order_by("id"),
+        )
+        self.assertGreater(len(owners), 1)
+        url = f"{reverse('product_type_member-list')}{owners[-1].pk}/"
+        response = self.client.delete(url)
+        self.assertEqual(204, response.status_code, response.content[:1000])
+
+    # (route, serializer module to patch, payload for an Owner grant)
+    OWNER_GRANT_CASES = (
+        ("product_member", "dojo.product.api.serializer",
+         {"product": 3, "user": 3, "role": 4}),
+        ("asset_member", "dojo.asset.api.serializers",
+         {"asset": 3, "user": 3, "role": 4}),
+        ("product_type_member", "dojo.product_type.api.serializer",
+         {"product_type": 2, "user": 3, "role": 4}),
+        ("organization_member", "dojo.organization.api.serializers",
+         {"organization": 2, "user": 3, "role": 4}),
+        ("product_group", "dojo.product.api.serializer",
+         {"product": 3, "group": 2, "role": 4}),
+        ("asset_group", "dojo.asset.api.serializers",
+         {"asset": 3, "group": 2, "role": 4}),
+        ("product_type_group", "dojo.product_type.api.serializer",
+         {"product_type": 2, "group": 2, "role": 4}),
+        ("organization_group", "dojo.organization.api.serializers",
+         {"organization": 2, "group": 2, "role": 4}),
+    )
+
+    def test_granting_owner_requires_the_own_action(self):
+        """
+        Owner is the one role a Maintainer may not hand out, on any of the
+        eight grant routes: the serializers check the "own" action for it, and
+        only Role.Owner carries "own".
+
+        This also pins the Asset / Organization serializers reading their
+        destination out of validated_data by **source** rather than by field
+        name. Read by field name (as the pre-3.0 source did) the destination
+        resolves to None, user_has_permission(user, None, ...) short-circuits
+        to False, and the check appears to pass for the wrong reason -- so the
+        assertion below is on the object the check was made against, not just
+        on the status code.
+        """
+        for viewname, serializer_module, payload in self.OWNER_GRANT_CASES:
+            with self.subTest(route=viewname):
+                container_pk = payload.get("product") or payload.get("asset") \
+                    or payload.get("product_type") or payload.get("organization")
+                container_model = (
+                    Product if "product" in payload or "asset" in payload else Product_Type
+                )
+                container = container_model.objects.get(pk=container_pk)
+
+                with patch(f"{serializer_module}.user_has_permission") as mock:
+                    mock.return_value = False
+                    response = self.client.post(reverse(f"{viewname}-list"), payload)
+
+                self.assertEqual(403, response.status_code, response.content[:1000])
+                self.assertIn("as Owner", str(response.data))
+                mock.assert_called_with(
+                    User.objects.get(username="admin"), container, "own",
+                )
+
+    def test_last_group_owner_cannot_be_deleted(self):
+        """
+        Group half of the last-Owner invariant. This one goes beyond the
+        pre-3.0 API (which guarded only the demote path) so that the REST
+        surface cannot strand a group the group UI refuses to strand.
+        """
+        last_owner = Dojo_Group_Member.objects.filter(
+            group_id=1, role__is_owner=True,
+        ).get()
+        url = f"{reverse('dojo_group_member-list')}{last_owner.pk}/"
+        response = self.client.delete(url)
+        self.assertEqual(400, response.status_code, response.content[:1000])
+        self.assertIn("at least one owner", str(response.data))
+        self.assertTrue(Dojo_Group_Member.objects.filter(pk=last_owner.pk).exists())
+
+    def test_last_group_owner_cannot_be_demoted(self):
+        last_owner = Dojo_Group_Member.objects.filter(
+            group_id=1, role__is_owner=True,
+        ).get()
+        url = f"{reverse('dojo_group_member-list')}{last_owner.pk}/"
+        response = self.client.put(url, {
+            "group": last_owner.group_id,
+            "user": last_owner.user_id,
+            "role": Roles.Writer,
+        })
+        self.assertEqual(400, response.status_code, response.content[:1000])
+        self.assertIn("at least one owner", str(response.data))
+
+    @override_settings(FEATURE_RBAC="on")
+    def test_a_member_may_leave_but_not_promote_themselves(self):
+        """
+        The self-referencing carve-out in authorization._authorized_for() is
+        scoped to Delete, and this pins why that matters: a grant row points at
+        its own user, so a broader carve-out would let any Reader PUT their own
+        Product_Member row up to Maintainer. Leaving is self-service; promoting
+        is not.
+        """
+        reader = User.objects.get(username="user2")
+        reader.is_staff = False
+        reader.is_superuser = False
+        reader.save()
+        membership = Product_Member.objects.create(
+            product_id=3, user=reader, role_id=Roles.Reader,
+        )
+        token, _ = Token.objects.get_or_create(user=reader)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Token " + token.key)
+
+        url = f"{reverse('product_member-list')}{membership.pk}/"
+
+        promote = client.put(url, {
+            "product": 3, "user": reader.pk, "role": Roles.Maintainer,
+        })
+        self.assertEqual(403, promote.status_code, promote.content[:1000])
+        membership.refresh_from_db()
+        self.assertEqual(Roles.Reader, membership.role_id)
+
+        leave = client.delete(url)
+        self.assertEqual(204, leave.status_code, leave.content[:1000])
+        self.assertFalse(Product_Member.objects.filter(pk=membership.pk).exists())
+
+    def test_parallel_surfaces_write_the_same_rows(self):
+        """
+        The Asset / Organization routes are a second API over the same tables,
+        not a separate store -- a row created through one is visible through
+        the other, and the ids match.
+        """
+        response = self.client.post(
+            reverse("asset_member-list"), {"asset": 3, "user": 3, "role": 2},
+        )
+        self.assertEqual(201, response.status_code, response.content[:1000])
+        created_id = response.data["id"]
+
+        mirrored = self.client.get(f"{reverse('product_member-list')}{created_id}/")
+        self.assertEqual(200, mirrored.status_code, mirrored.content[:1000])
+        self.assertEqual(3, mirrored.data["product"])
+        self.assertEqual(3, mirrored.data["user"])
 
 
 @versioned_fixtures

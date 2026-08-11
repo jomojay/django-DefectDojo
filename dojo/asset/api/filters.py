@@ -3,6 +3,7 @@ from django_filters.rest_framework import FilterSet
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 
+from dojo.authorization.models import Product_Group, Product_Member
 from dojo.filters import (
     CharFieldFilterANDExpression,
     CharFieldInFilter,
@@ -102,3 +103,26 @@ class ApiAssetFilter(DojoFilter):
             ("user_records", "user_records"),
         ),
     )
+
+
+# The v3 Asset twins of the product_members / product_groups filtersets
+# (INTEGRATIONS_ROADMAP.md §7.7), restored from
+# db1932c9e:dojo/asset/api/filters.py. They exist so the Asset routes can be
+# filtered with the v3 vocabulary (?asset_id=) while the Product-named routes
+# keep their own (?product_id=, expressed as plain filterset_fields).
+
+
+class AssetMemberFilterSet(FilterSet):
+    asset_id = NumberFilter(field_name="product_id")
+
+    class Meta:
+        model = Product_Member
+        fields = ("id", "user_id")
+
+
+class AssetGroupFilterSet(FilterSet):
+    asset_id = NumberFilter(field_name="product_id")
+
+    class Meta:
+        model = Product_Group
+        fields = ("id", "group_id")

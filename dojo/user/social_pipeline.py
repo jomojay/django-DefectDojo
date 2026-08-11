@@ -9,7 +9,13 @@ stock ``social_core`` pipeline does not make on its own:
 2. an SSO identity is linked to a pre-existing local account only when the address it claims is
    provably owned by the directory, never on the strength of a self-asserted ``email`` claim;
 3. an account created on first sign-in carries no privilege at all - an administrator grants
-   access afterwards through the existing Authorized Users panels.
+   access afterwards through the Authorized Users, Members and Groups panels on the Product and
+   Product Type pages.
+
+Nothing here assigns access of any kind, and that is deliberate rather than a gap: role and group
+membership stays a manual administrative act, exactly as it was under Authorized Users alone.
+Syncing it from directory group claims is a separate, deferred piece of work
+(INTEGRATIONS_ROADMAP.md Epic 1.5).
 
 Every value these steps read (allowed domains, tenant) is per-deployment runtime configuration.
 Nothing here is specific to any single organization.
@@ -261,11 +267,17 @@ def enforce_zero_privilege_defaults(backend, user=None, *, is_new=False, **kwarg
     """
     Strip every privilege from an account provisioned on first sign-in.
 
-    Open-source DefectDojo authorizes on ``is_superuser`` / ``is_staff`` plus per-Product and
-    per-Product Type ``authorized_users`` membership. A just-in-time provisioned user gets none of
-    them: an administrator grants access afterwards through the Authorized Users panels. Django's
-    ``create_user`` already defaults these flags to False; this step makes that an invariant of the
-    pipeline rather than an implementation detail, and produces the audit record for the event.
+    This fork authorizes on ``is_superuser`` / ``is_staff``, plus per-Product and per-Product Type
+    ``authorized_users`` membership, plus - once ``DD_FEATURE_RBAC`` is ``on`` - role grants made
+    through the Members and Groups panels. A just-in-time provisioned user gets none of them: an
+    administrator grants access afterwards through the Authorized Users, Members or Groups panel on
+    the relevant Product or Product Type.
+
+    The role-aware resolver does not weaken this step, it sharpens it: a new account with no
+    membership row in any of those tables resolves to zero access explicitly, where before it was
+    zero access by absence. Django's ``create_user`` already defaults these flags to False; this
+    step makes that an invariant of the pipeline rather than an implementation detail, and produces
+    the audit record for the event.
     """
     if user is None or not is_new:
         return
@@ -287,6 +299,6 @@ def enforce_zero_privilege_defaults(backend, user=None, *, is_new=False, **kwarg
 
     logger.info(
         "SSO backend %s provisioned new user %s with no privileges; "
-        "grant access through the Authorized Users panels",
+        "grant access through the Authorized Users, Members or Groups panels",
         backend.name, user.username,
     )

@@ -33,13 +33,26 @@ def _is_one_to_one_relation(field):
     return isinstance(field, related.ForwardManyToOneDescriptor)
 
 
-def get_prefetchable_fields(serializer):
+def get_prefetchable_fields(serializer, prefetcher=None):
     """
-    Get the fields that are prefetchable according to the serializer description.
-    Method mainly used by for automatic schema generation.
+    Get the fields that ``?prefetch=`` can actually serve for the given serializer.
+
+    Relations are discovered by introspecting the serializer's model, then
+    filtered down to the ones ``_Prefetcher`` is able to return. A relation is
+    only prefetchable if a serializer is registered for the model on the far
+    side of it: ``_Prefetcher._prefetch`` looks one up via ``_find_serializer``
+    and skips the field entirely when there is none, so advertising such a
+    field would promise a response key that can never appear.
+
+    A model existing does not oblige the API to expose it. RBAC models
+    (``Dojo_Group`` and friends) are reachable from ``Product`` /
+    ``Product_Type`` as plain model relations but have no serializer yet, so
+    they are correctly filtered out here until one is added.
 
     Args:
-        serializer (Serializer): [description]
+        serializer (Serializer): the serializer (class or instance) to introspect
+        prefetcher (_Prefetcher, optional): an existing prefetcher to reuse for
+            serializer lookups. Built on demand when not supplied.
 
     """
 
@@ -66,4 +79,15 @@ def get_prefetchable_fields(serializer):
             else:
                 fields.append((field_name, field.field.related_model))
 
-    return fields
+    if prefetcher is None:
+        from dojo.api_v2.prefetch.prefetcher import (  # noqa: PLC0415 -- lazy import, avoids circular dependency
+            _Prefetcher,
+        )
+
+        prefetcher = _Prefetcher()
+
+    return [
+        (field_name, field_type)
+        for field_name, field_type in fields
+        if prefetcher._find_serializer(field_type) is not None
+    ]

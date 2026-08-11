@@ -481,8 +481,21 @@
                                                             </a>
                                                         </li>
                                                     {% endif %}
-                                                    {# Pro restores the Groups link by overriding this block. #}
-                                                    {% block groups_submenu_link %}{% endblock %}
+                                                    {% comment %}
+                                                    Filled by this fork's RBAC reactivation (INTEGRATIONS_ROADMAP.md §7.8);
+                                                    upstream leaves it empty for Pro to override. Hidden while
+                                                    DD_FEATURE_RBAC is "off" so the module stays dark until PR 7.
+                                                    {% endcomment %}
+                                                    {% block groups_submenu_link %}
+                                                        {% feature_rbac_enabled as rbac_enabled %}
+                                                        {% if rbac_enabled and "auth.view_group"|has_configuration_permission:request %}
+                                                            <li>
+                                                                <a href="{% url 'groups' %}">
+                                                                    {% trans "Groups" %}
+                                                                </a>
+                                                            </li>
+                                                        {% endif %}
+                                                    {% endblock groups_submenu_link %}
                                                 </ul>
                                             </li>
                                         {% endif %}

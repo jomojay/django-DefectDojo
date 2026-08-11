@@ -33,6 +33,7 @@ from dojo.api_v2.views import (
 from dojo.api_v2.views import DojoSpectacularAPIView as SpectacularAPIView
 from dojo.asset.api.urls import add_asset_urls
 from dojo.asset.urls import urlpatterns as asset_urls
+from dojo.authorization.api.urls import add_authorization_urls
 from dojo.banner.ui.urls import urlpatterns as banner_urls
 from dojo.benchmark.ui.urls import urlpatterns as benchmark_urls
 from dojo.components.urls import urlpatterns as component_urls
@@ -46,6 +47,8 @@ from dojo.finding.api.urls import add_finding_urls
 from dojo.finding.ui.urls import urlpatterns as finding_urls
 from dojo.finding_group.urls import urlpatterns as finding_group_urls
 from dojo.github.ui.urls import urlpatterns as github_urls
+from dojo.group.api.urls import add_group_urls
+from dojo.group.ui.urls import urlpatterns as group_urls
 from dojo.home.urls import urlpatterns as home_urls
 from dojo.jira.urls import urlpatterns as jira_urls
 from dojo.location.api.endpoint_compat import V3EndpointCompatibleViewSet, V3EndpointStatusCompatibleViewSet
@@ -101,10 +104,11 @@ v2_api = DefaultRouter()
 v2_api = add_announcement_urls(v2_api)
 v2_api.register(r"configuration_permissions", ConfigurationPermissionViewSet, basename="permission")
 v2_api = add_development_environment_urls(v2_api)
-# RBAC endpoints moved to Pro under legacy authorization:
-#   dojo_groups, dojo_group_members → pro/groups, pro/group_members
+# RBAC: dojo_groups, dojo_group_members (INTEGRATIONS_ROADMAP.md §7.7)
+v2_api = add_group_urls(v2_api)
 v2_api = register_endpoint_meta_import(v2_api)
-# RBAC endpoint moved to Pro under legacy authorization: global_roles → pro/global_roles
+# RBAC: roles, global_roles (INTEGRATIONS_ROADMAP.md §7.7)
+v2_api = add_authorization_urls(v2_api)
 v2_api.register(r"import-languages", ImportLanguagesView, basename="importlanguages")
 v2_api.register(r"import-scan", ImportScanView, basename="importscan")
 v2_api.register(r"jira_instances", JiraInstanceViewSet, basename="jira_instance")
@@ -119,18 +123,16 @@ v2_api.register(r"network_locations", NetworkLocationsViewset, basename="network
 v2_api = add_notes_urls(v2_api)
 v2_api = add_note_type_urls(v2_api)
 add_notifications_urls(v2_api)
+# add_product_urls also registers the RBAC product_groups / product_members
+# routes; add_product_type_urls likewise for product_type_members /
+# product_type_groups (INTEGRATIONS_ROADMAP.md §7.7).
 v2_api = add_product_urls(v2_api)
-# RBAC endpoints moved to Pro under legacy authorization:
-#   product_groups, product_members → pro/product_groups, pro/product_members
 v2_api = add_product_type_urls(v2_api)
 v2_api = add_engagement_urls(v2_api)
 v2_api = add_finding_urls(v2_api)
-# RBAC endpoints moved to Pro under legacy authorization:
-#   product_type_members, product_type_groups → pro/product_type_members, pro/product_type_groups
 v2_api = add_regulations_urls(v2_api)
 v2_api.register(r"reimport-scan", ReImportScanView, basename="reimportscan")
 v2_api = add_risk_acceptance_urls(v2_api)
-# RBAC endpoint moved to Pro under legacy authorization: roles → pro/roles
 v2_api.register(r"sla_configurations", SLAConfigurationViewset, basename="sla_configurations")
 v2_api.register(r"sonarqube_issues", SonarqubeIssueViewSet, basename="sonarqube_issue")
 v2_api.register(r"sonarqube_transitions", SonarqubeIssueTransitionViewSet, basename="sonarqube_issue_transition")
@@ -161,6 +163,7 @@ ur += dev_env_urls
 ur += eng_urls
 ur += finding_urls
 ur += finding_group_urls
+ur += group_urls
 ur += home_urls
 ur += metrics_urls
 ur += organization_urls

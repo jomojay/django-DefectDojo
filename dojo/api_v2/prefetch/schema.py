@@ -55,6 +55,7 @@ def prefetch_postprocessing_hook(result, generator, request, public):
 
                     fields = get_prefetchable_fields(
                         serializer_classes[path](),
+                        prefetcher=prefetcher,
                     )
 
                     field_names = [

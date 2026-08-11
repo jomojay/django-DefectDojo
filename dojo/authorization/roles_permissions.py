@@ -1,26 +1,77 @@
 from enum import IntEnum, StrEnum
 
+from django.conf import settings
+
+# Valid states of the DD_FEATURE_RBAC rollout flag (INTEGRATIONS_ROADMAP.md §7.6).
+FEATURE_RBAC_OFF = "off"
+FEATURE_RBAC_SHADOW = "shadow"
+FEATURE_RBAC_ON = "on"
+FEATURE_RBAC_STATES = frozenset({FEATURE_RBAC_OFF, FEATURE_RBAC_SHADOW, FEATURE_RBAC_ON})
+
+
+def feature_rbac_state() -> str:
+    """
+    Current DD_FEATURE_RBAC state, read fresh from settings on *every* call.
+
+    Deliberately not cached and never bound to a module-level constant: the whole
+    point of the "shadow" state is to compare two live code paths on every check,
+    and tests flip this with ``override_settings`` without restarting the process.
+    Unknown / misspelled values resolve to "off" so a typo in the environment fails
+    closed onto the legacy engine rather than silently enabling enforcement.
+    """
+    state = getattr(settings, "FEATURE_RBAC", FEATURE_RBAC_OFF)
+    state = str(state or FEATURE_RBAC_OFF).strip().lower()
+    return state if state in FEATURE_RBAC_STATES else FEATURE_RBAC_OFF
+
+
+# The action set implied by legacy ``authorized_users`` membership on a Product or
+# Product_Type, expressed as its own constant rather than borrowed from a named Role
+# - no Role below matches these semantics exactly (Writer is the closest, but the
+# equivalence is a coincidence of the current matrix, not a definition).
+#
+# Frozen by definition: this is exactly what the pre-RBAC model granted a non-staff
+# authorized_users member, and it must never silently widen. It has to keep matching
+# what the legacy short-circuit + action-blind membership check in
+# ``authorization._legacy_authorized()`` actually grants today - view/add/edit/import
+# allowed, delete/manage/own/staff_only denied - otherwise a plain authorized_users
+# member would gain or lose capability purely from flipping DD_FEATURE_RBAC.
+LEGACY_AUTHORIZED_USERS_ACTIONS = frozenset({"view", "add", "edit", "import"})
+
 
 class Action(StrEnum):
 
     """
-    Legacy permission actions. The fine-grained Permissions enum below is
-    preserved so existing call sites (`@user_is_authorized(Permissions.X, …)`)
-    keep compiling, but every check now flattens to one of these intents:
+    Permission actions. The fine-grained Permissions enum below is preserved
+    so existing call sites (`@user_is_authorized(Permissions.X, …)`) keep
+    compiling, but every check flattens to one of these intents:
 
       * View          — read-only access to an object (membership in
                         authorized_users, or staff/superuser bypass)
       * Edit / Add    — mutating an existing object or creating one
                         (membership in authorized_users + staff bypass)
-      * Delete        — destroying an object (staff/superuser only)
+      * Delete        — destroying an object (staff/superuser only today;
+                        Maintainer/Owner under the role-aware resolver)
       * Import        — bulk ingest of scan results (staff bypass + per-product
                         membership)
+      * Manage        — member/group grant management on a container
+                        (Product / Product_Type / Dojo_Group)
+      * Own           — container-level ownership: delete the container,
+                        grant the Owner role to somebody else
       * StaffOnly     — administrative actions like member management or
-                        configuration changes
+                        configuration changes. Fully superseded by
+                        ``Manage``/``Own``: no permission name resolves here any
+                        more, and no role grants it. Retained as an accepted
+                        input shape (callers may still pass it explicitly) and
+                        as the legacy "staff bypass only" marker.
       * SuperuserOnly — system-wide changes that legacy never delegated
 
-    The role hierarchy (Reader / Writer / Maintainer / Owner) does not exist
-    in this model; per-product distinctions collapse to membership.
+    ``Manage`` and ``Own`` exist so that the role matrix in
+    ``get_roles_with_permissions()`` can express Maintainer > Writer and
+    Owner > Maintainer. ``permission_to_action()`` resolves ``_Manage_`` and
+    ``_Add_Owner`` permission names to them, so they are produced by real
+    request-path checks — though only ``DD_FEATURE_RBAC=on`` resolves them
+    through the role matrix; ``off`` keeps treating both as staff-only
+    (INTEGRATIONS_ROADMAP.md §7.6).
     """
 
     View = "view"
@@ -28,6 +79,8 @@ class Action(StrEnum):
     Edit = "edit"
     Delete = "delete"
     Import = "import"
+    Manage = "manage"
+    Own = "own"
     StaffOnly = "staff_only"
     SuperuserOnly = "superuser_only"
 
@@ -35,11 +88,19 @@ class Action(StrEnum):
 class Roles(IntEnum):
 
     """
-    Preserved for backward compatibility. Legacy authorization no longer
-    branches on roles — these values now act as labels only. The membership
-    tables (Product_Member, Product_Type_Member, Global_Role) exist as inert
-    data tables that the dojo-pro plugin can adopt; nothing in dojo/ reads
-    role assignments after the legacy rewrite.
+    The role hierarchy: Reader < API_Importer/Writer < Maintainer < Owner.
+
+    The integer values are the primary keys of the seeded ``dojo_role`` rows
+    and must not be renumbered. The action set each role grants is defined by
+    ``get_roles_with_permissions()`` below; role assignments live in
+    ``Product_Member`` / ``Product_Type_Member`` / ``Global_Role`` and the
+    corresponding ``*_Group`` tables.
+
+    These are consulted by the role-aware resolver in
+    ``dojo.authorization.query_registrations``, which ``user_has_permission()``
+    selects when ``DD_FEATURE_RBAC`` is ``on`` (and evaluates alongside the
+    legacy resolver when it is ``shadow``). Under the default ``off`` they are
+    never read — see INTEGRATIONS_ROADMAP.md §7.6.
     """
 
     Reader = 5
@@ -289,10 +350,26 @@ class Permissions(IntEnum):
 
 
 def get_roles_with_permissions():
+    """
+    The role → action-set matrix (INTEGRATIONS_ROADMAP.md §7.3).
+
+    Cumulative by design — each role is a strict superset of the one below it:
+
+      Reader       view                                        (read-only stakeholder)
+      Writer       + add, edit, import                         (no delete, historically)
+      Maintainer   + delete, manage                            (member/group grants)
+      Owner        + own                                       (delete container, grant Owner)
+
+    ``API_Importer`` sits outside the ladder: same actions as Writer, so that
+    a token-only integration account can push scan results without gaining
+    ``delete`` or member management.
+
+    Pure function, no DB access — the ``dojo_role`` rows carry only the name
+    and ``is_owner`` flag; the authority behind each role lives here.
+    """
     return {
         Roles.Reader: {
             "view",
-            "add",
         },
         Roles.API_Importer: {
             "view",
@@ -305,23 +382,23 @@ def get_roles_with_permissions():
             "add",
             "edit",
             "import",
-            "delete",
         },
         Roles.Maintainer: {
-            "add",
             "view",
-            "delete",
-            "staff_only",
+            "add",
             "edit",
             "import",
+            "delete",
+            "manage",
         },
         Roles.Owner: {
-            "add",
             "view",
-            "delete",
-            "staff_only",
+            "add",
             "edit",
             "import",
+            "delete",
+            "manage",
+            "own",
         },
     }
 
@@ -367,7 +444,26 @@ def permission_to_action(permission):
         return Action.Delete
     if name.endswith(("_Add_Product", "_Add")):
         return Action.Add
-    if "_Manage_" in name or name.endswith("_Add_Owner"):
-        return Action.StaffOnly
+    # Repointed at Action.Manage / Action.Own in PR 3, together with the
+    # flag-gating of the short-circuit these used to rely on. The two changes are
+    # one coupled edit and had to land in the same commit:
+    #
+    #   * before: `_Manage_`/`_Add_Owner` resolved to Action.StaffOnly purely so
+    #     they would hit `if action in {StaffOnly, Delete}: return user.is_staff`
+    #     in user_has_permission(). Repointing them alone would have dropped the
+    #     Manage-Members views through to the action-blind membership check,
+    #     letting any authorized_users member manage grants.
+    #   * now: authorization._legacy_authorized() keeps treating Manage and Own as
+    #     staff-only (they *are* the actions that used to be StaffOnly), so with
+    #     DD_FEATURE_RBAC=off those views resolve exactly as they always did. Under
+    #     "on", the role-aware resolver answers them from the role matrix instead,
+    #     which is what makes Maintainer/Owner mean anything at all.
+    #
+    # Action.StaffOnly is retained as an input shape (callers may still pass it
+    # explicitly, and it stays granted by no role) but is no longer produced here.
+    if "_Manage_" in name:
+        return Action.Manage
+    if name.endswith("_Add_Owner"):
+        return Action.Own
 
     return Action.View

@@ -1,6 +1,9 @@
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from dojo.api_v2.serializers import ProductMetaSerializer, TagListSerializerField
+from dojo.authorization.authorization import user_has_permission
+from dojo.authorization.models import Product_Group, Product_Member
 from dojo.models import (
     Dojo_User,
     Product,
@@ -73,3 +76,126 @@ class AssetSerializer(serializers.ModelSerializer):
     # TODO: maybe extend_schema_field is needed here?
     def get_findings_list(self, obj) -> list[int]:
         return obj.open_findings_list()
+
+
+# ---------------------------------------------------------------------------
+# Role-grant rows on an Asset (= Product) - the v3 twin of
+# dojo/product/api/serializer.py's member/group serializers
+# (INTEGRATIONS_ROADMAP.md §7.7).
+#
+# Ported from db1932c9e:dojo/asset/api/serializers.py. Same rows, same
+# invariants; the payload key is "asset" (sourced from product) and
+# RelatedAssetField restricts the choosable destinations to the requester's
+# authorized products - a narrowing the Product-named twin deliberately does
+# not have (it ships fields="__all__", exactly as it did pre-3.0). The
+# destination is authorized either way by UserHasProductMemberPermission /
+# UserHasAssetMemberPermission before the serializer runs; the difference is
+# only whether an unauthorized destination fails as 400 or 403.
+#
+# ONE CORRECTION to the ported source, and it is load-bearing. The original
+# read the destination out of validate()'s `data` as data.get("asset").
+# `data` is validated_data, which DRF keys by a field's **source**, not its
+# declared name - so with asset = RelatedAssetField(source="product"), that
+# lookup was always None. The duplicate guard therefore filtered
+# Product_Member.objects.filter(product=None, ...), matched nothing, and never
+# fired: POSTing a grant that already existed returned 201 through the Asset
+# routes while the identical POST through the Product routes returned 400.
+# The Owner check had the same defect (user_has_permission(user, None, "own")
+# is always False for a non-superuser, always True for a superuser, i.e. it
+# checked nothing). Reading data["product"] fixes both. The pre-3.0 author had
+# clearly hit this once already: the Organization member serializer carries a
+# data.get("organization", data.get("product_type")) fallback on exactly the
+# line where the fallback is what made the guard work.
+# ---------------------------------------------------------------------------
+
+
+class AssetMemberSerializer(serializers.ModelSerializer):
+    asset = RelatedAssetField(source="product")
+
+    class Meta:
+        model = Product_Member
+        exclude = ("product",)
+
+    def validate(self, data):
+        # `data` is validated_data: keyed by source ("product"), not by the
+        # declared field name ("asset"). See the note above this class.
+        asset = data.get("product")
+
+        if (
+            self.instance is not None
+            and asset != self.instance.product
+            and not user_has_permission(
+                self.context["request"].user,
+                asset,
+                "manage",
+            )
+        ):
+            msg = "You are not permitted to add a member to this Asset"
+            raise PermissionDenied(msg)
+
+        if (
+            self.instance is None
+            or asset != self.instance.product
+            or data.get("user") != self.instance.user
+        ):
+            members = Product_Member.objects.filter(
+                product=asset, user=data.get("user"),
+            )
+            if members.count() > 0:
+                msg = "Asset Member already exists"
+                raise ValidationError(msg)
+
+        if data.get("role").is_owner and not user_has_permission(
+            self.context["request"].user,
+            asset,
+            "own",
+        ):
+            msg = "You are not permitted to add a member as Owner to this Asset"
+            raise PermissionDenied(msg)
+
+        return data
+
+
+class AssetGroupSerializer(serializers.ModelSerializer):
+    asset = RelatedAssetField(source="product")
+
+    class Meta:
+        model = Product_Group
+        exclude = ("product",)
+
+    def validate(self, data):
+        asset = data.get("product")
+
+        if (
+            self.instance is not None
+            and asset != self.instance.product
+            and not user_has_permission(
+                self.context["request"].user,
+                asset,
+                "manage",
+            )
+        ):
+            msg = "You are not permitted to add a group to this Asset"
+            raise PermissionDenied(msg)
+
+        if (
+            self.instance is None
+            or asset != self.instance.product
+            or data.get("group") != self.instance.group
+        ):
+            members = Product_Group.objects.filter(
+                product=asset, group=data.get("group"),
+            )
+            if members.count() > 0:
+                msg = "Asset Group already exists"
+                raise ValidationError(msg)
+
+        if data.get("role").is_owner and not user_has_permission(
+            self.context["request"].user,
+            asset,
+            "own",
+        ):
+            msg = "You are not permitted to add a group as Owner to this Asset"
+            raise PermissionDenied(msg)
+
+        return data

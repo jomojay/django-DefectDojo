@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% comment %}
+Shared by add_group and edit_group - the two forms are identical, so this is
+one template parameterized by `form_action` rather than two copies.
+
+Description is a plain textarea: no other admin create-form in this codebase
+wires up the markdown editor, and this one is not the place to start
+(INTEGRATIONS_ROADMAP.md §7.8).
+{% endcomment %}
+{% block content %}
+    {{ block.super }}
+    <h3>{{ name }}</h3>
+    <form class="" action="{{ form_action }}" method="post">{% csrf_token %}
+        {% include "dojo/form_fields.html" with form=form %}
+        <div class="form-group">
+            <div class="col-sm-offset-2 col-sm-10">
+                <input class="btn btn-primary" type="submit" value="{% trans "Submit" %}"/>
+            </div>
+        </div>
+    </form>
+{% endblock %}

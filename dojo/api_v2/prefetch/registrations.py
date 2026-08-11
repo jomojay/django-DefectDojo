@@ -30,6 +30,16 @@ from dojo.api_v2.prefetch.authorized_querysets import (
     register,
     superuser_only,
 )
+from dojo.authorization.models import (
+    Dojo_Group,
+    Dojo_Group_Member,
+    Global_Role,
+    Product_Group,
+    Product_Member,
+    Product_Type_Group,
+    Product_Type_Member,
+    Role,
+)
 from dojo.endpoint.queries import (
     get_authorized_endpoint_status,
     get_authorized_endpoints,
@@ -41,6 +51,7 @@ from dojo.finding.queries import (
 )
 from dojo.finding_group.queries import get_authorized_finding_groups
 from dojo.github.models import GITHUB_Issue, GITHUB_PKey
+from dojo.group.queries import get_authorized_group_members, get_authorized_groups
 from dojo.jira.models import JIRA_Instance, JIRA_Issue, JIRA_Project
 from dojo.jira.queries import (
     get_authorized_jira_issues,
@@ -103,9 +114,15 @@ from dojo.product.queries import (
     get_authorized_engagement_presets,
     get_authorized_languages,
     get_authorized_product_api_scan_configurations,
+    get_authorized_product_groups,
+    get_authorized_product_members,
     get_authorized_products,
 )
-from dojo.product_type.queries import get_authorized_product_types
+from dojo.product_type.queries import (
+    get_authorized_product_type_groups,
+    get_authorized_product_type_members,
+    get_authorized_product_types,
+)
 from dojo.risk_acceptance.queries import get_authorized_risk_acceptances
 from dojo.test.queries import get_authorized_test_imports, get_authorized_tests
 from dojo.tool_product.queries import get_authorized_tool_product_settings
@@ -236,3 +253,41 @@ for child, parent, field in (
 
 # Playing it safe: the raw User model isn't exposed via ViewSet or serializer usage, but clamp it down just in case.
 register(User, django_view_perm, User)
+
+
+########
+# RBAC models (INTEGRATIONS_ROADMAP.md §7.7).
+#
+# The second of the two gates a prefetchable relation has to pass. A serializer
+# in dojo/api_v2/serializers.py makes the relation *advertised*
+# (prefetch/utils.py:get_prefetchable_fields filters on serializer existence);
+# a policy here makes it *served*. A model with the first and not the second is
+# advertised in the OpenAPI prefetch enum and then silently omitted from every
+# response, which is exactly the failure mode this split is designed to make
+# loud rather than subtle -- so every model whose serializer was added in this
+# PR gets an entry below.
+#
+# Concretely: Product.authorization_groups / Product_Type.authorization_groups
+# only start returning data once BOTH DojoGroupSerializer exists AND Dojo_Group
+# is registered here.
+########
+
+# Superuser only -- GlobalRoleViewSet is gated on IsSuperUser, and a
+# Global_Role row is the privilege-escalation surface of the whole system.
+register(Global_Role, superuser_only, Global_Role)
+
+# The role catalogue is a fixed, seeded, non-sensitive list; RoleViewSet is
+# reachable by any authenticated user.
+register(Role, authenticated_only, Role)
+
+# Models where we can fall back to a `get_authorized_*` method to check auth.
+# Each mirrors the queryset of the ViewSet added for it in this PR.
+for model, helper in (
+    (Dojo_Group, get_authorized_groups),  # DojoGroupViewSet
+    (Dojo_Group_Member, get_authorized_group_members),  # DojoGroupMemberViewSet
+    (Product_Member, get_authorized_product_members),  # ProductMemberViewSet / AssetMemberViewSet
+    (Product_Group, get_authorized_product_groups),  # ProductGroupViewSet / AssetGroupViewSet
+    (Product_Type_Member, get_authorized_product_type_members),  # ProductTypeMemberViewSet / OrganizationMemberViewSet
+    (Product_Type_Group, get_authorized_product_type_groups),  # ProductTypeGroupViewSet / OrganizationGroupViewSet
+):
+    register(model, discard_user(helper), "view")

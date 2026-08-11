@@ -15,25 +15,32 @@ seo:
 exclude_search: true
 ---
 
-DefectDojo's user management surface is different in each edition. Pick the section that matches your installation.
+This installation has **two access-control models running side by side**, and a user's access is the union of whatever both of them grant. Neither replaces the other.
 
-## DefectDojo Open-Source
+## Authorized Users
 
-Open-source DefectDojo uses the **Authorized Users** model: a user is given access to a Product or a Product Type by being added to that record's Authorized Users list. Superusers and staff can see everything.
+The simplest grant, and the one that has always been available in open-source DefectDojo: a user is given access to a Product or a Product Type by being added to that record's Authorized Users list. It is all-or-nothing — there is no read-only tier — which is the reason the role-based model below was brought back. Superusers and staff can see everything regardless.
 
 * [Authorized Users](./os__authorized_users/) — how to grant access to Products and Product Types
 
-Authentication on open-source DefectDojo is local username/password plus the password-reset flow.
+## Roles, Members and Groups
 
-## DefectDojo Pro
+Upstream open-source DefectDojo dropped Members / Groups / Global Roles at the 3.0 release and left them to DefectDojo Pro. **This installation reactivates them**, so a user can be granted a specific Role (Reader, Writer, Maintainer, Owner, API Importer) on a Product or Product Type rather than blanket access — individually, or through a Group.
 
-DefectDojo Pro uses a role-based system with Members, Groups, and Global Roles. Users can also be granted SSO access through SAML or one of the supported OAuth providers.
+Enforcement is staged behind the `DD_FEATURE_RBAC` setting. In `shadow` — the default — the panels and the roles are all present and assignable, and every decision the roles would make is written to the log, but the Authorized Users answer is still the one that takes effect. Set `DD_FEATURE_RBAC=on` to make roles authoritative.
 
 * [Permissions in DefectDojo](./about_perms_and_roles/) — overview of Roles, Memberships, Global Roles, and Configuration Permissions
 * [Set a User's Permissions](./set_user_permissions/) — assigning Roles, Global Roles, and Configuration Permissions
 * [Share permissions: User Groups](./create_user_group/) — assigning permissions to many users at once
-* [Set Permissions in Pro](./pro_permissions_overhaul/) — Pro-specific UI for managing Members and Permissions
 * [Action permission charts](./user_permission_chart/) — full reference of every permission for every Role
+
+## Authentication
+
+Local username/password plus the password-reset flow, and — where the deployment configures it — OIDC single sign-on against Microsoft Entra ID. Signing in through the identity provider grants no access on its own: a new account is provisioned with zero privileges and is then granted access through the panels above.
+
+## DefectDojo Pro
+
+* [Set Permissions in Pro](./pro_permissions_overhaul/) — Pro-specific UI for managing Members and Permissions
 * [Single Sign-On](/admin/sso/) — SAML and OAuth setup for Pro
 
 ## Migrating between editions

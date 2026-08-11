@@ -140,6 +140,29 @@ sso:
     clientSecret:
       secretName: defectdojo-sso-azuread
       secretKey: DD_SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET
+
+# -- Feature rollout flags. Like the `sso` block above, these are injected into the uwsgi, celery
+# worker, celery beat and initializer containers alike and must match across all of them: celery
+# tasks resolve permissions too, and a flag that only reached the web tier would make the workers
+# disagree with the web pods about who can see what.
+featureFlags:
+  # -- Role-based access control enforcement state. One of:
+  #
+  # `off` - legacy Authorized Users / staff authorization only, exactly the pre-RBAC engine.
+  #
+  # `shadow` (default) - both the legacy and the role-aware resolver run on every object-level
+  # check, the legacy answer is still the one returned, and any disagreement is logged at WARNING
+  # with the user, the object type and pk, the permission, and both answers. Nobody gains or loses
+  # access in this state; it is a dark launch that surfaces every access change under real traffic
+  # before anyone is affected by it. Follow it in `kubectl logs -l defectdojo.org/component=django
+  # -f`, where each divergence is prefixed `RBAC shadow divergence`.
+  #
+  # `on` - the role-aware resolver becomes authoritative for both object-level checks and queryset
+  # filtering. Flip to this only after the shadow log has been reviewed. Any other value fails the
+  # render rather than silently falling back, because DefectDojo itself fails closed to `off` and a
+  # typo would quietly disable enforcement. Quote it when you set it to on in a values file —
+  # `rbac: on` is a YAML boolean and is rejected as the wrong type, `rbac: "on"` is what you want.
+  rbac: shadow
 imagePullPolicy: Always
 # @schema type:[string, null]
 # -- When using a private registry, name of the secret that holds the registry secret (eg deploy token from gitlab-ci project)

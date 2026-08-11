@@ -2,12 +2,11 @@
 title: "Set a User's permissions"
 description: "How to grant Roles & Permissions to a user, as well as superuser status"
 weight: 2
-audience: pro
 aliases:
   - /en/customize_dojo/user_management/set_user_permissions
 ---
 
-> **DefectDojo Pro feature.** The Members / Groups / Global Roles RBAC system described on this page is part of DefectDojo Pro. Open-source DefectDojo uses the [Authorized Users](../os__authorized_users/) model — see that page for open-source access control, and the [3.0 upgrade notes](/releases/os_upgrading/3.0/#authorized-users-panel-replaces-membersgroups-under-legacy-authorization) if you're moving between editions.
+> **Pro feature upstream, enabled here.** The Members / Groups / Global Roles RBAC system described on this page ships only in DefectDojo Pro upstream. This installation reactivates that system in the open-source build, so this page applies here. Whether the roles are actually **enforced** is controlled by the `DD_FEATURE_RBAC` setting: `shadow` (the default) evaluates the roles and logs what they *would* decide without changing anyone's access, and `on` makes them authoritative. Role-based grants sit **alongside** the [Authorized Users](../os__authorized_users/) model rather than replacing it — a user's access is the union of both. See the [3.0 upgrade notes](/releases/os_upgrading/3.0/#authorized-users-panel-replaces-membersgroups-under-legacy-authorization) for the upstream history.
 
 ## Introduction to Permission Types
 

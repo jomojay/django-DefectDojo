@@ -2,6 +2,7 @@ import crum
 
 from dojo.authorization.authorization import user_has_configuration_permission as configuration_permission
 from dojo.authorization.authorization import user_has_global_permission, user_has_permission
+from dojo.authorization.roles_permissions import FEATURE_RBAC_OFF, feature_rbac_state
 from dojo.request_cache import cache_for_request
 
 
@@ -45,3 +46,16 @@ def user_can_clear_peer_review(finding, user):
     user_requesting_review = user == finding.review_requested_by
     user_is_reviewer = user in finding.reviewers.all()
     return finding_under_review and (user_requesting_review or user_is_reviewer)
+
+
+def feature_rbac_enabled():
+    """
+    Whether the RBAC surface should render at all (INTEGRATIONS_ROADMAP.md §7.6).
+
+    True for both ``shadow`` and ``on``: under ``shadow`` the role-aware
+    resolver is being evaluated for divergence logging, so operators need the
+    panels visible to create the grants that shadow mode is there to compare.
+    Read per call, never bound at import time, so the flag stays flippable in
+    tests and at runtime.
+    """
+    return feature_rbac_state() != FEATURE_RBAC_OFF

@@ -159,6 +159,24 @@ env = environ.FileAwareEnv(
     DD_PASSWORD_RESET_TIMEOUT=(int, 259200),  # 3 days, in seconds (the deafult)
     DD_FORGOT_USERNAME=(bool, True),  # do we show link "I forgot my username" on login screen
     # --------------------------------------------------------------------------------------------
+    # Role-based access control (INTEGRATIONS_ROADMAP.md §7.6). Three states:
+    #   "off"    - Legacy authorized_users / is_staff authorization only, bit-identical to the
+    #              pre-RBAC engine. The role tables are never consulted.
+    #   "shadow" - default. Both resolvers run on every object-level check; the legacy answer is
+    #              returned and any divergence is logged at WARNING. Queryset filtering stays legacy
+    #              so that object-level and list-level answers keep agreeing while shadowing.
+    #   "on"     - the role-aware resolver is authoritative for both object checks and querysets.
+    # Anything else is treated as "off" (fail closed).
+    #
+    # The default moved off -> shadow once the engine, the REST API and the UI panels had all
+    # landed (§7.10 PR 7). "shadow" is still observably identical to "off" for every user - it
+    # only ever returns the legacy answer - so an instance that upgrades without setting this
+    # variable does not change who can do what. What it buys is the divergence log: every access
+    # decision the role model would have made differently shows up at WARNING, under the
+    # deployment's own real traffic, before anybody is affected by it. Read it for a business cycle
+    # and then set DD_FEATURE_RBAC=on to make the role-aware resolver authoritative.
+    DD_FEATURE_RBAC=(str, "shadow"),
+    # --------------------------------------------------------------------------------------------
     # Single Sign-On (Microsoft Entra ID / Azure AD, OIDC)
     #
     # Every value below is per-deployment runtime configuration: an identity provider is bound to a
@@ -1025,6 +1043,17 @@ if env("DD_DJANGO_METRICS_ENABLED"):
     # CELERY_RESULT_BACKEND.replace('django.core','django_prometheus.', 1)
     LOGIN_EXEMPT_URLS += (rf"^{URL_PREFIX}django_metrics/",)
 
+
+# ------------------------------------
+# Role-based access control rollout flag
+# ------------------------------------
+# "off" | "shadow" (default) | "on" - see the DD_FEATURE_RBAC entry in the env block above for what
+# each state does and why the default is "shadow" rather than "off" or "on".
+# Never bind this to a module-level constant inside dojo/authorization/: the value is read fresh on
+# every check (dojo.authorization.roles_permissions.feature_rbac_state) so that it can be flipped
+# with override_settings in tests without a process restart, and so "shadow" can compare both live
+# code paths on every request.
+FEATURE_RBAC = env("DD_FEATURE_RBAC")
 
 # ------------------------------------
 # Single Sign-On - Microsoft Entra ID (Azure AD) over OIDC

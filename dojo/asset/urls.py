@@ -133,6 +133,38 @@ if settings.ENABLE_V3_ORGANIZATION_ASSET_RELABEL:
             views.delete_product_authorized_user,
             name="delete_product_authorized_user",
         ),
+        # RBAC role grants (INTEGRATIONS_ROADMAP.md §7.8). These sit alongside
+        # the authorized_users routes above rather than replacing them (§7.4).
+        re_path(
+            r"^asset/(?P<pid>\d+)/members/add$",
+            views.add_product_member,
+            name="add_product_member",
+        ),
+        re_path(
+            r"^asset/member/(?P<memberid>\d+)/edit$",
+            views.edit_product_member,
+            name="edit_product_member",
+        ),
+        re_path(
+            r"^asset/member/(?P<memberid>\d+)/delete$",
+            views.delete_product_member,
+            name="delete_product_member",
+        ),
+        re_path(
+            r"^asset/(?P<pid>\d+)/groups/add$",
+            views.add_product_group,
+            name="add_product_group",
+        ),
+        re_path(
+            r"^asset/group/(?P<groupid>\d+)/edit$",
+            views.edit_product_group,
+            name="edit_product_group",
+        ),
+        re_path(
+            r"^asset/group/(?P<groupid>\d+)/delete$",
+            views.delete_product_group,
+            name="delete_product_group",
+        ),
         re_path(
             r"^asset/(?P<pid>\d+)/add_api_scan_configuration$",
             views.add_api_scan_configuration,
@@ -239,6 +271,20 @@ else:
         re_path(r"^product/(?P<pid>\d+)/authorized_users/(?P<user_id>\d+)/delete$",
                 views.delete_product_authorized_user,
                 name="delete_product_authorized_user"),
+        # RBAC role grants (INTEGRATIONS_ROADMAP.md §7.8), alongside the
+        # authorized_users routes above rather than replacing them (§7.4).
+        re_path(r"^product/(?P<pid>\d+)/members/add$", views.add_product_member,
+                name="add_product_member"),
+        re_path(r"^product/member/(?P<memberid>\d+)/edit$", views.edit_product_member,
+                name="edit_product_member"),
+        re_path(r"^product/member/(?P<memberid>\d+)/delete$", views.delete_product_member,
+                name="delete_product_member"),
+        re_path(r"^product/(?P<pid>\d+)/groups/add$", views.add_product_group,
+                name="add_product_group"),
+        re_path(r"^product/group/(?P<groupid>\d+)/edit$", views.edit_product_group,
+                name="edit_product_group"),
+        re_path(r"^product/group/(?P<groupid>\d+)/delete$", views.delete_product_group,
+                name="delete_product_group"),
         re_path(r"^product/(?P<pid>\d+)/add_api_scan_configuration$", views.add_api_scan_configuration,
                 name="add_api_scan_configuration"),
         re_path(r"^product/(?P<pid>\d+)/view_api_scan_configurations$", views.view_api_scan_configurations,
