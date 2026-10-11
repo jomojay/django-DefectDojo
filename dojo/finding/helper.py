@@ -52,6 +52,7 @@ from dojo.utils import (
     close_external_issue,
     get_current_user,
     get_object_or_none,
+    reopen_external_issue,
     to_str_typed,
 )
 
@@ -395,18 +396,19 @@ def add_findings_to_auto_group(name, findings, group_by, *, create_finding_group
 
 @app.task
 def post_process_finding_save(finding_id, dedupe_option=True, rules_option=True, product_grading_option=True,  # noqa: FBT002
-             issue_updater_option=True, push_to_jira=False, user=None, *args, **kwargs):  # noqa: FBT002 - this is bit hard to fix nice have this universally fixed
+             issue_updater_option=True, push_to_jira=False, push_to_solarwinds=False, user=None, *args, **kwargs):  # noqa: FBT002 - this is bit hard to fix nice have this universally fixed
     finding = get_object_or_none(Finding, id=finding_id)
     if not finding:
         logger.warning("Finding with id %s does not exist, skipping post_process_finding_save", finding_id)
         return None
 
     return post_process_finding_save_internal(finding, dedupe_option, rules_option, product_grading_option,
-                                   issue_updater_option, push_to_jira, user, *args, **kwargs)
+                                   issue_updater_option, push_to_jira, user, *args,
+                                   push_to_solarwinds=push_to_solarwinds, **kwargs)
 
 
 def post_process_finding_save_internal(finding, dedupe_option=True, rules_option=True, product_grading_option=True,  # noqa: FBT002
-             issue_updater_option=True, push_to_jira=False, user=None, *args, **kwargs):  # noqa: FBT002 - this is bit hard to fix nice have this universally fixed
+             issue_updater_option=True, push_to_jira=False, user=None, *args, push_to_solarwinds=False, **kwargs):  # noqa: FBT002 - this is bit hard to fix nice have this universally fixed
 
     if not finding:
         logger.warning("post_process_finding_save called with finding==None, skipping post processing")
@@ -455,6 +457,42 @@ def post_process_finding_save_internal(finding, dedupe_option=True, rules_option
         elif finding.finding_group:
             jira_services.push(finding.finding_group)
 
+    # SolarWinds Service Desk. Unlike push_to_jira above, this is not gated on the
+    # explicit flag alone: SolarWinds_Product.push_all_findings is resolved inside
+    # push_finding() so the config-driven mode works from every save path without
+    # replicating the decision at ~15 call sites (see
+    # _save_finding_with_solarwinds_sync).
+    #
+    # Cost on a deployment that does not use the integration: exactly one query
+    # (`any_push_mapping_exists()`, against a table holding a handful of rows), which
+    # short-circuits before push_finding() walks test -> engagement -> product. The
+    # finding here comes from a bare get_object_or_none() with no select_related, so
+    # that walk would otherwise be three more queries on every single finding save.
+    _solarwinds_helper().push_finding(finding, push_requested=push_to_solarwinds)
+
+
+def post_process_finding_save_solarwinds(finding):
+    """
+    Run the SolarWinds half of post-processing, and nothing else.
+
+    Called from ``Finding.save()`` on the branch where every post-processing *option*
+    was switched off, so :func:`post_process_finding_save` does not run at all -
+    ``save_no_options()`` and friends. ``SolarWinds_Product.push_all_findings`` is
+    configuration rather than an option, so a caller passing ``dedupe_option=False``
+    must not silently disable it; before this existed, those save paths never opened a
+    ticket and said nothing about it.
+
+    Not implemented by widening ``Finding.save()``'s gate to re-enter
+    :func:`post_process_finding_save_internal`: that function also runs false-positive
+    history, which is gated on system settings and not on any option flag, so the wider
+    gate would newly run it on save paths that deliberately opt out of everything.
+
+    ``push_requested`` is not a parameter here on purpose - an explicit push already
+    forces the main gate open, so reaching this function means the config-driven mode
+    is the only trigger in play.
+    """
+    _solarwinds_helper().push_finding(finding)
+
 
 @app.task
 def post_process_findings_batch(
@@ -465,6 +503,7 @@ def post_process_findings_batch(
     product_grading_option=True,
     issue_updater_option=True,
     push_to_jira=False,
+    push_to_solarwinds=False,
     jira_instance_id=None,
     user=None,
     force_sync=False,
@@ -541,6 +580,33 @@ def post_process_findings_batch(
                 jira_services.push(object_to_push)
     else:
         logger.debug("push_to_jira is False, not pushing to JIRA")
+
+    # SolarWinds Service Desk. Wired into the batch path as well as the single-save
+    # path because an import is where findings actually arrive in bulk - without this,
+    # push_all_findings would only ever fire for findings edited by hand.
+    #
+    # The whole batch belongs to one product (the product-grading call above already
+    # relies on that), so the routing lookup is done exactly once here and then handed
+    # to every push_finding() call - including on the branch that actually pushes,
+    # which is the one that matters. Resolving it per finding meant a 5,000-finding
+    # import into a push_all_findings product re-ran the same mapping query 5,000
+    # times; only the "nothing configured" skip branch was ever cheap.
+    #
+    # The per-finding checks inside push_finding (status pushable, already ticketed)
+    # are NOT hoisted: they differ finding by finding. An empty list is a real answer
+    # here, which is why push_finding distinguishes it from `None` rather than
+    # treating both as "go and look".
+    solarwinds_helper = _solarwinds_helper()
+    solarwinds_mappings = solarwinds_helper.get_product_mappings(findings[0])
+    if push_to_solarwinds or solarwinds_helper.is_push_all_findings(findings[0], mappings=solarwinds_mappings):
+        for finding in findings:
+            solarwinds_helper.push_finding(
+                finding,
+                push_requested=push_to_solarwinds,
+                mappings=solarwinds_mappings,
+            )
+    else:
+        logger.debug("no SolarWinds push-all mapping for this product, not pushing to SolarWinds")
 
 
 @receiver(pre_delete, sender=Finding)
@@ -1235,6 +1301,57 @@ def _create_note_if_provided(
     return new_note
 
 
+def _solarwinds_helper():
+    """
+    Return ``dojo.solarwinds.helper``, imported lazily.
+
+    JIRA gets its own import-light facade module (``dojo.jira.services``) so this
+    module can import it at the top. SolarWinds has no equivalent: its
+    ``services.py`` is deliberately pure (payload building only) and the orchestration
+    lives in ``helper.py``, which imports models and the notification helper. Importing
+    that at module scope would close an import cycle, so it is resolved per call - the
+    same lazy-import convention AGENTS.md prescribes elsewhere in the codebase.
+    """
+    from dojo.solarwinds import helper as solarwinds_helper  # noqa: PLC0415 -- lazy import, avoids circular dependency
+
+    return solarwinds_helper
+
+
+def _save_finding_with_solarwinds_sync(finding, *, push_to_solarwinds=False):
+    """
+    Persist ``finding`` and let the SolarWinds integration open a ticket if configured.
+
+    The parallel of :func:`_save_finding_with_jira_sync`, and a **deliberate partial
+    departure** from it worth understanding before changing either.
+
+    JIRA's ``push_to_jira`` is computed at every call site (roughly fifteen of them
+    across ``dojo/finding/ui/views.py``, ``dojo/product/ui/views.py``,
+    ``dojo/risk_acceptance/helper.py`` and the API) as
+    ``is_push_all_issues(finding) or <the form's push_to_jira checkbox>``, then threaded
+    down through ``Finding.save(push_to_jira=...)``. That shape exists because JIRA also
+    needs a per-finding UI checkbox and "keep in sync" semantics.
+
+    SolarWinds keeps the *plumbing* identical - ``Finding.save(push_to_solarwinds=...)``
+    threads through to ``post_process_finding_save`` exactly as JIRA's flag does - but
+    the ``push_all_findings`` half of the decision is evaluated inside the post-save
+    hook rather than replicated at each call site. Doing it JIRA's way would mean
+    editing every one of those call sites plus both template trees to add a checkbox,
+    which is outside this pass's scope, and would leave ``push_all_findings`` dead in
+    the meantime. The consequence is that the config-driven mode works everywhere a
+    finding is saved, while the explicit per-finding trigger has a threaded parameter
+    ready for whichever call site (or UI checkbox) opts in later.
+
+    "Everywhere a finding is saved" was an overstatement until it was made true:
+    ``Finding.save()``'s post-processing gate is a disjunction of the post-processing
+    *options*, and a caller passing all of them False (``save_no_options()``, and
+    ``jira.helper.finding_link_jira`` / the SonarQube status updater when product
+    grading is off) skipped post-processing wholesale, taking the SolarWinds push with
+    it. Those paths now reach :func:`post_process_finding_save_solarwinds` on the
+    gate's else branch instead, so the claim above holds literally.
+    """
+    finding.save(push_to_solarwinds=push_to_solarwinds)
+
+
 def _save_finding_with_jira_sync(finding, *, new_note=None):
     """Persist finding and apply JIRA sync behavior used by finding status actions."""
     push_to_jira = False
@@ -1327,6 +1444,82 @@ def close_finding(
         title=f"Closing of {finding.title}",
         finding=finding,
         description=f'The finding "{finding.title}" was closed by {user}',
+        url=reverse("view_finding", args=(finding.id,)),
+    )
+
+
+def reopen_finding(
+    *,
+    finding,
+    user,
+    note_entry=None,
+    note_type=None,
+) -> None:
+    """
+    Shared reopen logic - the inverse of :func:`close_finding`.
+
+    Extracted so an automated reactivation (the SolarWinds inbound poll, when a
+    resolved incident is reopened by a technician) goes through one reviewed
+    transition instead of hand-setting ``active`` / ``is_mitigated`` / ``mitigated``
+    and quietly skipping the endpoint/location statuses, the risk-acceptance clear and
+    the external-issue reopen - exactly the mistake ``close_finding`` exists to
+    prevent on the other side.
+
+    ``mitigated_by`` is cleared rather than reassigned to ``user``: a finding that is
+    open has no mitigator, and callers (the SolarWinds poll included) read that field
+    to decide *who* closed a finding, so leaving a stale name on an open finding would
+    make that answer wrong.
+
+    NOTE: ``dojo/finding/ui/views.py:reopen_finding`` still performs this transition
+    inline and is deliberately left alone in this pass. Migrating it is a behaviour
+    change in its own right - that view sets ``last_reviewed`` to ``None`` (it assigns
+    ``finding.mitigated`` *after* clearing it) and writes ``mitigated_by =
+    request.user`` onto a finding it is reopening - so it belongs in a focused change,
+    not folded into a bug-fix pass for a different module.
+    """
+    reopened_time = now()
+
+    finding.active = True
+    finding.is_mitigated = False
+    finding.mitigated = None
+    finding.mitigated_by = None
+    finding.under_review = False
+    finding.last_reviewed = reopened_time
+    finding.last_reviewed_by = user
+
+    new_note = _create_note_if_provided(
+        finding,
+        note_entry,
+        note_type=note_type,
+        note_date=reopened_time,
+    )
+
+    if settings.V3_FEATURE_LOCATIONS:
+        for ref in finding.locations.all():
+            ref.set_status(FindingLocationStatus.Active, user, reopened_time)
+    else:
+        # TODO: Delete this after the move to Locations
+        for status in finding.status_finding.all():
+            status.mitigated_by = None
+            status.mitigated_time = None
+            status.mitigated = False
+            status.last_modified = reopened_time
+            status.save()
+
+    # A reopened finding must not stay risk-accepted. perform_save=False because the
+    # JIRA-sync save below is the one write.
+    ra_helper.risk_unaccept(user, finding, perform_save=False)
+
+    # External issues (best effort), mirroring close_finding's call.
+    reopen_external_issue(finding.id, "Reopened by defectdojo", "github")
+
+    _save_finding_with_jira_sync(finding, new_note=new_note)
+
+    create_notification(
+        event="finding_reopened",
+        title=f"Reopening of {finding.title}",
+        finding=finding,
+        description=f'The finding "{finding.title}" was reopened by {user}',
         url=reverse("view_finding", args=(finding.id,)),
     )
 

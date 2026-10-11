@@ -71,6 +71,8 @@ from dojo.reports.ui.urls import urlpatterns as reports_urls
 from dojo.risk_acceptance.api.urls import add_risk_acceptance_urls
 from dojo.search.urls import urlpatterns as search_urls
 from dojo.sla_config.urls import urlpatterns as sla_urls
+from dojo.solarwinds.api.urls import add_solarwinds_urls
+from dojo.solarwinds.ui.urls import urlpatterns as solarwinds_urls
 from dojo.survey.ui.urls import urlpatterns as survey_urls
 from dojo.system_settings.api.urls import add_system_settings_urls
 from dojo.system_settings.ui.urls import urlpatterns as system_settings_urls
@@ -134,6 +136,8 @@ v2_api = add_regulations_urls(v2_api)
 v2_api.register(r"reimport-scan", ReImportScanView, basename="reimportscan")
 v2_api = add_risk_acceptance_urls(v2_api)
 v2_api.register(r"sla_configurations", SLAConfigurationViewset, basename="sla_configurations")
+# SolarWinds Service Desk config (INTEGRATIONS_ROADMAP.md §8.2)
+v2_api = add_solarwinds_urls(v2_api)
 v2_api.register(r"sonarqube_issues", SonarqubeIssueViewSet, basename="sonarqube_issue")
 v2_api.register(r"sonarqube_transitions", SonarqubeIssueTransitionViewSet, basename="sonarqube_issue_transition")
 v2_api = add_system_settings_urls(v2_api)
@@ -178,6 +182,7 @@ ur += tool_type_urls
 ur += tool_config_urls
 ur += tool_product_urls
 ur += sla_urls
+ur += solarwinds_urls
 ur += system_settings_urls
 ur += notifications_urls
 ur += object_urls

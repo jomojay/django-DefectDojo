@@ -246,7 +246,7 @@ class DefaultImporter(BaseImporter, DefaultImporterOptions):
             finding.set_hash_code(True)
 
             # postprocessing will be done after processing related fields like locations, vulnerability ids, etc.
-            unsaved_finding.save_no_options()
+            unsaved_finding.save_no_options(defer_post_processing=True)
 
             # Determine how the finding should be grouped
             finding_will_be_grouped = self.process_finding_groups(

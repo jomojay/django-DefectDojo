@@ -600,6 +600,17 @@
                                                         </a>
                                                     </li>
                                                 {% endif %}
+                                                {% if "dojo.view_solarwinds_instance"|has_configuration_permission:request %}
+                                                    {% comment %}
+                                                    No system_settings.enable_* flag for this one - unlike JIRA/GitHub, the
+                                                    integration is gated per configuration row (push_enabled / poll_enabled).
+                                                    {% endcomment %}
+                                                    <li>
+                                                        <a href="{% url 'solarwinds_instances' %}">
+                                                            {% trans "SolarWinds Service Desk" %}
+                                                        </a>
+                                                    </li>
+                                                {% endif %}
                                                 {% if request.user.is_superuser %}
                                                     <li>
                                                         <a href="{% url 'system_settings' %}">

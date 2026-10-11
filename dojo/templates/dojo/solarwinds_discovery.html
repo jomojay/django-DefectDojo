@@ -1,0 +1,69 @@
+{% load i18n %}
+{% comment %}
+Read-only reference panel for what a tenant actually has configured
+(dojo/solarwinds/discovery.py).
+
+The split between the two halves is the whole point and must not be flattened
+into one uniform "pick a value" UI: sites / departments / categories / groups come
+from real lookup endpoints and are exhaustive, while states and priorities have NO
+lookup endpoint on this API and can only be sampled off existing incidents. The
+caveat text next to the observed labels is load-bearing - a tenant whose incidents
+are all "New" will not show "Resolved" here even though it is perfectly valid
+(INTEGRATIONS_ROADMAP.md §8.1, R9/R19).
+{% endcomment %}
+<div class="panel panel-info">
+    <div class="panel-heading">
+        <h4>{% trans "Tenant reference values" %}</h4>
+    </div>
+    <div class="panel-body">
+        {% if discovery.errors %}
+            <div class="alert alert-warning">
+                <strong>{% trans "Some lookups failed." %}</strong>
+                <ul>
+                    {% for section, error in discovery.errors.items %}
+                        <li><b>{{ section }}</b>: {{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        <h5>{% trans "Workflow states and priorities" %}</h5>
+        <div class="alert alert-warning">
+            {{ discovery.observed_caveat }}
+            {% blocktrans with count=discovery.observed_sample_size %}Sampled {{ count }} incident(s).{% endblocktrans %}
+        </div>
+        <dl class="dl-horizontal">
+            <dt>{% trans "Observed states" %}</dt>
+            <dd>
+                {% for state in discovery.observed_states %}<code>{{ state }}</code>{% if not forloop.last %}, {% endif %}{% empty %}{% trans "none observed" %}{% endfor %}
+            </dd>
+            <dt>{% trans "Observed priorities" %}</dt>
+            <dd>
+                {% for priority in discovery.observed_priorities %}<code>{{ priority }}</code>{% if not forloop.last %}, {% endif %}{% empty %}{% trans "none observed" %}{% endfor %}
+            </dd>
+        </dl>
+
+        <h5>{% trans "Lookups (complete)" %}</h5>
+        <div class="row">
+            {% for label, options in discovery.collections.items %}
+                <div class="col-md-3">
+                    <b>{{ label }}</b>
+                    {% if options %}
+                        <table class="table table-condensed table-striped">
+                            <thead>
+                            <tr><th>{% trans "Id" %}</th><th>{% trans "Name" %}</th></tr>
+                            </thead>
+                            <tbody>
+                            {% for option in options %}
+                                <tr><td><code>{{ option.id }}</code></td><td>{{ option.name }}</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p>{% trans "none" %}</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>

@@ -42,6 +42,9 @@ class NotificationsSerializer(serializers.ModelSerializer):
     jira_update = MultipleChoiceField(
         choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION,
     )
+    solarwinds_update = MultipleChoiceField(
+        choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION,
+    )
     upcoming_engagement = MultipleChoiceField(
         choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION,
     )

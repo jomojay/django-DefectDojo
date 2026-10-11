@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% comment %}
+Shared by add_solarwinds_product and edit_solarwinds_product, parameterized by
+`form_action` - same shape as dojo_group_form.html.
+{% endcomment %}
+{% block content %}
+    {{ block.super }}
+    <h3>{{ name }}</h3>
+    <p class="help-block">
+        {% trans "Every field left blank falls back to the configuration default - blank means inherit, not clear." %}
+    </p>
+    <form class="" action="{{ form_action }}" method="post">{% csrf_token %}
+        {% include "dojo/form_fields.html" with form=form %}
+        <div class="form-group">
+            <div class="col-sm-offset-2 col-sm-10">
+                <input class="btn btn-primary" type="submit" value="{% trans "Submit" %}"/>
+            </div>
+        </div>
+    </form>
+{% endblock %}

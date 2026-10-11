@@ -940,7 +940,11 @@ if env("DD_CELERY_TASK_DEFAULT_EXPIRES") > 0:
 if len(env("DD_CELERY_BROKER_TRANSPORT_OPTIONS")) > 0:
     CELERY_BROKER_TRANSPORT_OPTIONS = json.loads(env("DD_CELERY_BROKER_TRANSPORT_OPTIONS"))
 
-CELERY_IMPORTS = ("dojo.tools.tool_issue_updater", )
+# app.autodiscover_tasks() only picks up <installed_app>/tasks.py, and both of these
+# live in packages *inside* the dojo app rather than in apps of their own, so their
+# tasks would never be registered with the worker (and the beat entries below would
+# fail with NotRegistered) without being named here.
+CELERY_IMPORTS = ("dojo.tools.tool_issue_updater", "dojo.solarwinds.tasks")
 
 # Watson async index update settings
 WATSON_ASYNC_INDEX_UPDATE_BATCH_SIZE = env("DD_WATSON_ASYNC_INDEX_UPDATE_BATCH_SIZE")
@@ -1009,6 +1013,30 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=0, minute=0, day_of_week=0),
         "options": {
             "expires": int(60 * 60 * 24 * 7 * 1.2),  # If a task is not executed within 8.4 days, it should be dropped from the queue. Two more tasks should be scheduled in the meantime.
+        },
+    },
+    "solarwinds-poll-resolved": {
+        "task": "dojo.solarwinds.tasks.poll_resolved_incidents",
+        "schedule": crontab(minute="*/10"),
+        "options": {
+            # Well under the 10-minute interval on purpose: a queued run that is already
+            # stale has nothing to add, because the next run re-reads the same window.
+            # The API has no sub-day filter (R20), so every run fetches a full day of
+            # incident activity and reconciles from the per-ticket cursor - dropping a
+            # backed-up run loses no state.
+            "expires": int(60 * 10 * 0.9),
+        },
+    },
+    "solarwinds-token-health-check": {
+        "task": "dojo.solarwinds.tasks.check_instance_tokens",
+        # Hourly, not on the poll's 10-minute cadence: this exists to catch a rotated
+        # service-account token (R6), which is a once-in-a-while human action. Probing
+        # every 10 minutes would spend six times the rate-limit budget to shorten the
+        # detection window by minutes, and would repeat the same alert six times an hour
+        # while the token stayed broken.
+        "schedule": crontab(minute=5),
+        "options": {
+            "expires": int(60 * 60 * 1.2),  # If a task is not executed within 72 minutes, it should be dropped from the queue. Two more tasks should be scheduled in the meantime.
         },
     },
     # 'jira_status_reconciliation': {

@@ -838,7 +838,7 @@ class DefaultReImporter(BaseImporter, DefaultReImporterOptions):
             # restart the sla start date to the current date, finding.save() will set new sla_expiration_date
             existing_finding.sla_start_date = self.now
         # don't dedupe before endpoints/locations are added, postprocessing will be done on next save (in calling method)
-        existing_finding.save_no_options()
+        existing_finding.save_no_options(defer_post_processing=True)
 
         if existing_finding.duplicate:
             note_entry = f"Un-mitigated by {self.scan_type} re-upload but kept inactive because the finding is a duplicate."
@@ -890,7 +890,7 @@ class DefaultReImporter(BaseImporter, DefaultReImporterOptions):
                 if self.verified is not None:
                     existing_finding.verified = self.verified
                 existing_finding = self.process_cve(existing_finding)
-                existing_finding.save_no_options()
+                existing_finding.save_no_options(defer_post_processing=True)
 
             elif unsaved_finding.risk_accepted or unsaved_finding.false_p or unsaved_finding.out_of_scope:
                 logger.debug("Reimported mitigated item matches a finding that is currently open, closing.")
@@ -905,7 +905,7 @@ class DefaultReImporter(BaseImporter, DefaultReImporterOptions):
                 if self.verified is not None:
                     existing_finding.verified = self.verified
                 existing_finding = self.process_cve(existing_finding)
-                existing_finding.save_no_options()
+                existing_finding.save_no_options(defer_post_processing=True)
             else:
                 # if finding is the same but list of affected was changed, finding is marked as unchanged. This is a known issue
                 self.unchanged_items.append(existing_finding)
@@ -918,7 +918,7 @@ class DefaultReImporter(BaseImporter, DefaultReImporterOptions):
         ):
             existing_finding.component_name = existing_finding.component_name or component_name
             existing_finding.component_version = existing_finding.component_version or component_version
-            existing_finding.save_no_options()
+            existing_finding.save_no_options(defer_post_processing=True)
         # Return False here to make sure further processing happens
         return existing_finding, False
 
@@ -943,7 +943,7 @@ class DefaultReImporter(BaseImporter, DefaultReImporterOptions):
         unsaved_finding = self.process_cve(unsaved_finding)
         # Hash code is already calculated earlier as it's the primary matching criteria for reimport
         # Save it. Don't dedupe before endpoints/locations are added.
-        unsaved_finding.save_no_options()
+        unsaved_finding.save_no_options(defer_post_processing=True)
         finding = unsaved_finding
         # Force parsers to use unsaved_tags (stored in finding_post_processing function below)
         finding.tags = None

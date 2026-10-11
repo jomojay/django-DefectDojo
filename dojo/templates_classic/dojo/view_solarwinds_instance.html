@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load authorization_tags %}
+{% block content %}
+    {{ block.super }}
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h3>
+                {{ instance.configuration_name }}
+                <div class="dropdown pull-right">
+                    <button class="btn btn-primary dropdown-toggle" type="button" id="solarwindsMenu"
+                            data-toggle="dropdown" aria-expanded="true"
+                            aria-label="{% trans "Configuration options" %}">
+                        <span class="fa-solid fa-screwdriver-wrench"></span>
+                        <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-right" role="menu" aria-labelledby="solarwindsMenu">
+                        {% if "dojo.change_solarwinds_instance"|has_configuration_permission:request %}
+                            <li role="presentation">
+                                <a href="{% url 'edit_solarwinds_instance' instance.id %}">
+                                    <i class="fa-solid fa-pencil"></i> {% trans "Edit" %}
+                                </a>
+                            </li>
+                            <li role="presentation">
+                                <a href="{% url 'test_solarwinds_instance' instance.id %}">
+                                    <i class="fa-solid fa-plug"></i> {% trans "Test connection" %}
+                                </a>
+                            </li>
+                        {% endif %}
+                        {% if "dojo.add_solarwinds_product"|has_configuration_permission:request %}
+                            <li role="presentation">
+                                <a href="{% url 'add_solarwinds_product' instance.id %}">
+                                    <i class="fa-solid fa-plus"></i> {% trans "Add Product Mapping" %}
+                                </a>
+                            </li>
+                        {% endif %}
+                        {% if "dojo.delete_solarwinds_instance"|has_configuration_permission:request %}
+                            <li role="presentation">
+                                <a href="{% url 'delete_solarwinds_instance' instance.id %}">
+                                    <i class="fa-solid fa-trash"></i> {% trans "Delete" %}
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </h3>
+        </div>
+        <div class="panel-body">
+            <dl class="dl-horizontal">
+                <dt>{% trans "API base URL" %}</dt><dd><code>{{ instance.base_url }}</code></dd>
+                <dt>{% trans "Region" %}</dt><dd>{{ instance.get_region_display }}</dd>
+                <dt>{% trans "Service account" %}</dt><dd>{{ instance.service_account_email|default:"-" }}</dd>
+                <dt>{% trans "Default site id" %}</dt><dd>{{ instance.default_site_id|default:"-" }}</dd>
+                <dt>{% trans "Default department id" %}</dt><dd>{{ instance.default_department_id|default:"-" }}</dd>
+                <dt>{% trans "Default category" %}</dt><dd>{{ instance.default_category|default:"-" }}</dd>
+                <dt>{% trans "Open state" %}</dt><dd><code>{{ instance.open_state }}</code></dd>
+                <dt>{% trans "Resolved states" %}</dt><dd>{{ instance.resolved_states }}</dd>
+                <dt>{% trans "Severity to priority" %}</dt><dd>{{ instance.severity_priority_map }}</dd>
+                <dt>{% trans "Auto-push severities" %}</dt><dd>{{ instance.auto_push_severities|default:"-" }}</dd>
+                <dt>{% trans "Push enabled" %}</dt><dd>{{ instance.push_enabled|yesno:_("Yes,No") }}</dd>
+                <dt>{% trans "Poll enabled" %}</dt><dd>{{ instance.poll_enabled|yesno:_("Yes,No") }}</dd>
+            </dl>
+            <p class="help-block">
+                {% trans "A severity with no entry in the severity map is never pushed - that is the configured behaviour, not a bug." %}
+            </p>
+            <p class="help-block">
+                {% trans "Auto-push severities are the subset that a 'Push all findings' product files automatically. Severities that are mapped but not listed there are still pushable, one finding at a time, from the Add/Edit Finding screens. An empty list means nothing is ever filed automatically - that is the default." %}
+            </p>
+        </div>
+    </div>
+
+    {% if discovery %}
+        {% include "dojo/solarwinds_discovery.html" with discovery=discovery %}
+    {% endif %}
+
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h4>{% trans "Product Mappings" %}</h4>
+        </div>
+        {% if mappings %}
+            <table class="table table-condensed table-striped">
+                <thead>
+                <tr>
+                    <th>{% trans "Product" %}</th>
+                    <th>{% trans "Site id" %}</th>
+                    <th>{% trans "Department id" %}</th>
+                    <th>{% trans "Assignment group id" %}</th>
+                    <th>{% trans "Push all findings" %}</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for mapping in mappings %}
+                    <tr>
+                        <td>{{ mapping.product }}</td>
+                        <td>{{ mapping.site_id|default:"-" }}</td>
+                        <td>{{ mapping.department_id|default:"-" }}</td>
+                        <td>{{ mapping.group_assignee_id|default:"-" }}</td>
+                        <td>{{ mapping.push_all_findings|yesno:_("Yes,No") }}</td>
+                        <td>
+                            {% if "dojo.change_solarwinds_product"|has_configuration_permission:request %}
+                                <a href="{% url 'edit_solarwinds_product' mapping.id %}">{% trans "Edit" %}</a>
+                            {% endif %}
+                            {% if "dojo.delete_solarwinds_product"|has_configuration_permission:request %}
+                                <a href="{% url 'delete_solarwinds_product' mapping.id %}">{% trans "Delete" %}</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="panel-body">
+                <p>{% trans "No product mappings. Findings use the configuration defaults above." %}</p>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

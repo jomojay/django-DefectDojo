@@ -96,6 +96,7 @@ from dojo.models import (
     User,
 )
 from dojo.notifications.helper import create_notification
+from dojo.solarwinds.ui import forms as solarwinds_forms
 from dojo.tags.utils import bulk_add_tags_to_instances
 from dojo.test.queries import get_authorized_tests
 from dojo.test.ui.filters import TestImportFilter, TestImportFindingActionFilter
@@ -777,6 +778,12 @@ class EditFinding(View):
                 return GITHUBFindingForm(*args, **kwargs)
         return None
 
+    def get_solarwinds_form(self, request: HttpRequest, finding: Finding, finding_form: FindingForm = None):
+        # Returns None - and the template then renders nothing - unless this product has
+        # a push-enabled SolarWinds mapping and this finding's severity is mapped to a
+        # priority label. Same shape as get_jira_form's `jira_project is None` gate.
+        return solarwinds_forms.build_finding_form(request, finding=finding, finding_form=finding_form)
+
     def get_initial_context(self, request: HttpRequest, finding: Finding):
         # Get the finding form first since it is used in another place
         finding_form = self.get_finding_form(request, finding)
@@ -785,6 +792,7 @@ class EditFinding(View):
             "finding": finding,
             "jform": self.get_jira_form(request, finding, finding_form=finding_form),
             "gform": self.get_github_form(request, finding),
+            "sform": self.get_solarwinds_form(request, finding, finding_form=finding_form),
             "return_url": get_return_url(request),
             "product_tab": Product_Tab(
                 finding.test.engagement.product, title="Edit Finding", tab="findings",
@@ -1004,6 +1012,28 @@ class EditFinding(View):
 
         return request, False, False
 
+    def process_solarwinds_form(self, request: HttpRequest, finding: Finding, context: dict):
+        """
+        Return ``(request, form_valid, push_to_solarwinds)`` for the SolarWinds checkbox.
+
+        **Only the checkbox is returned, deliberately not**
+        ``is_push_all_findings_auto(finding) or checkbox`` the way JIRA computes its
+        equivalent. JIRA has to OR in the config-driven half at every call site because
+        nothing inside ``Finding.save()`` consults ``push_all_issues``; this
+        integration resolves ``push_all_findings`` *inside* the post-save hook
+        (roadmap 8.5), so OR-ing it here would be a no-op that implies a mechanism
+        that is not there. The auto half still reaches the form - as ``push_all``, which
+        renders the box checked and disabled - so the operator sees the same thing.
+        """
+        if context.get("sform") is None:
+            return request, True, False
+
+        if context["sform"].is_valid():
+            return request, True, bool(context["sform"].cleaned_data.get("push_to_solarwinds"))
+        add_field_errors_to_response(context["sform"])
+
+        return request, False, False
+
     def process_github_form(self, request: HttpRequest, finding: Finding, context: dict, old_status: str):
         if "githubform-push_to_github" not in request.POST:
             return request, True
@@ -1031,6 +1061,8 @@ class EditFinding(View):
         form_success_list.append(success)
         request, success, push_to_jira = self.process_jira_form(request, new_finding, context)
         form_success_list.append(success)
+        request, success, push_to_solarwinds = self.process_solarwinds_form(request, new_finding, context)
+        form_success_list.append(success)
         request, success = self.process_github_form(request, new_finding, context, old_status)
         form_success_list.append(success)
         # Determine if all forms were successful
@@ -1041,9 +1073,9 @@ class EditFinding(View):
             # do not relaunch deduplication, otherwise, it's never taken into account
             if old_finding.duplicate and not new_finding.duplicate:
                 new_finding.duplicate_finding = None
-                new_finding.save(push_to_jira=push_to_jira, dedupe_option=False)
+                new_finding.save(push_to_jira=push_to_jira, push_to_solarwinds=push_to_solarwinds, dedupe_option=False)
             else:
-                new_finding.save(push_to_jira=push_to_jira)
+                new_finding.save(push_to_jira=push_to_jira, push_to_solarwinds=push_to_solarwinds)
             # we only push the group after storing the finding to make sure
             # the updated data of the finding is pushed as part of the group
             if push_to_jira and finding.finding_group:

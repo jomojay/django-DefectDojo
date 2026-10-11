@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% comment %}
+Shared by add_solarwinds_instance and edit_solarwinds_instance - the two forms are
+identical, so this is one template parameterized by `form_action`, matching
+dojo_group_form.html.
+
+The "Test connection" button submits this same form with a different button name;
+the view runs the discovery probe instead of saving and re-renders with the
+results below. That is deliberately a plain form submit rather than JS-driven
+dropdowns: state and priority have no lookup endpoint, so a dropdown would imply a
+completeness this API cannot provide (INTEGRATIONS_ROADMAP.md §8.1).
+{% endcomment %}
+{% block content %}
+    {{ block.super }}
+    <h3>{{ name }}</h3>
+    <form class="form-horizontal" action="{{ form_action }}" method="post">{% csrf_token %}
+        {% include "dojo/form_fields.html" with form=form %}
+        {% if instance %}
+            <p class="help-block">
+                {% trans "An API token is already stored for this configuration. Leave the token field blank to keep it." %}
+            </p>
+        {% endif %}
+        <div class="form-group">
+            <div class="col-sm-offset-2 col-sm-10">
+                <input class="btn btn-primary" type="submit" value="{% trans "Submit" %}"/>
+                <button class="btn btn-default" type="submit" name="test_connection" value="test_connection">
+                    {% trans "Test connection" %}
+                </button>
+            </div>
+        </div>
+    </form>
+    {% if discovery %}
+        {% include "dojo/solarwinds_discovery.html" with discovery=discovery %}
+    {% endif %}
+{% endblock %}

@@ -28,6 +28,16 @@ class Notifications(models.Model):
     scan_added = MultiSelectField(choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION, blank=True, help_text=_("Triggered whenever an (re-)import has been done that created/updated/closed findings."))
     scan_added_empty = MultiSelectField(choices=NOTIFICATION_CHOICES, default=[], blank=True, help_text=_("Triggered whenever an (re-)import has been done (even if that created/updated/closed no findings)."))
     jira_update = MultiSelectField(choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION, blank=True, verbose_name=_("JIRA problems"), help_text=_("JIRA sync happens in the background, errors will be shown as notifications/alerts so make sure to subscribe"))
+    solarwinds_update = MultiSelectField(
+        choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION, blank=True,
+        verbose_name=_("SolarWinds problems"),
+        help_text=_(
+            "SolarWinds Service Desk sync happens in the background. Failed ticket pushes and - "
+            "the reason this is its own subscription rather than folded into 'other' - a rejected "
+            "service-account API token are reported here. A rotated token stops all sync silently, "
+            "so make sure someone is subscribed.",
+        ),
+    )
     upcoming_engagement = MultiSelectField(choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION, blank=True)
     stale_engagement = MultiSelectField(choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION, blank=True)
     auto_close_engagement = MultiSelectField(choices=NOTIFICATION_CHOICES, default=DEFAULT_NOTIFICATION, blank=True)

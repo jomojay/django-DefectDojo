@@ -405,10 +405,19 @@ class TagInheritancePerfBaselines(DojoTestCase):
     EXPECTED_PRODUCT_TAG_REMOVE_100_V2 = 53
     EXPECTED_PRODUCT_TAG_REMOVE_100_V3 = 53
 
-    EXPECTED_CREATE_ONE_FINDING_V2 = 55
-    EXPECTED_CREATE_ONE_FINDING_V3 = 55
-    EXPECTED_CREATE_100_FINDINGS_V2 = 3124
-    EXPECTED_CREATE_100_FINDINGS_V3 = 3124
+    # +1 query per individual Finding.save() as of the SolarWinds sync hook
+    # (2026-09-18): post_process_finding_save_internal asks
+    # solarwinds.helper.any_push_mapping_exists() whether the integration is
+    # configured at all, which short-circuits before the three-query
+    # test -> engagement -> product walk that resolving a mapping would need.
+    # Deliberate and deterministic, not a regression. The importer path is
+    # unaffected per finding - post_process_findings_batch answers the same
+    # question once per batch, which is why the ZAP baselines below moved by 1
+    # and not by 19.
+    EXPECTED_CREATE_ONE_FINDING_V2 = 56
+    EXPECTED_CREATE_ONE_FINDING_V3 = 56
+    EXPECTED_CREATE_100_FINDINGS_V2 = 3224
+    EXPECTED_CREATE_100_FINDINGS_V3 = 3224
 
     EXPECTED_FINDING_ADD_USER_TAG_V2 = 17
     EXPECTED_FINDING_ADD_USER_TAG_V3 = 17
@@ -590,9 +599,13 @@ class TagInheritanceImportPerfBaselines(DojoAPITestCase):
     # the async watson indexer, executed inline under CELERY_TASK_ALWAYS_EAGER);
     # +5 reimport (no-change + with-new) queries from removal of
     # WATSON_ASYNC_INDEX_UPDATE_THRESHOLD making async dispatch unconditional.
-    EXPECTED_ZAP_IMPORT_V2 = 287
-    EXPECTED_ZAP_IMPORT_V3 = 311
-    EXPECTED_ZAP_REIMPORT_NO_CHANGE_V2 = 74
-    EXPECTED_ZAP_REIMPORT_NO_CHANGE_V3 = 86
-    EXPECTED_ZAP_REIMPORT_WITH_NEW_V2 = 148
-    EXPECTED_ZAP_REIMPORT_WITH_NEW_V3 = 177
+    # Each +1 as of the SolarWinds sync hook (2026-09-18):
+    # post_process_findings_batch asks once per batch whether any product is
+    # mapped to a push-enabled instance, so the cost is per *import* and does
+    # not scale with the 19 findings in the scan.
+    EXPECTED_ZAP_IMPORT_V2 = 288
+    EXPECTED_ZAP_IMPORT_V3 = 312
+    EXPECTED_ZAP_REIMPORT_NO_CHANGE_V2 = 75
+    EXPECTED_ZAP_REIMPORT_NO_CHANGE_V3 = 87
+    EXPECTED_ZAP_REIMPORT_WITH_NEW_V2 = 149
+    EXPECTED_ZAP_REIMPORT_WITH_NEW_V3 = 178

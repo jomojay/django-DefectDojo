@@ -539,7 +539,8 @@ class Finding(BaseModel):
         return self.title
 
     def save(self, dedupe_option=True, rules_option=True, product_grading_option=True,  # noqa: FBT002
-             issue_updater_option=True, push_to_jira=False, user=None, *args, **kwargs):  # noqa: FBT002 - this is bit hard to fix nice have this universally fixed
+             issue_updater_option=True, push_to_jira=False, push_to_solarwinds=False, user=None,  # noqa: FBT002 - this is bit hard to fix nice have this universally fixed
+             *args, defer_post_processing=False, **kwargs):
         logger.debug("Start saving finding of id " + str(self.id) + " dedupe_option:" + str(dedupe_option) + " (self.pk is %s)", "None" if self.pk is None else "not None")
         from dojo.finding import helper as finding_helper  # noqa: PLC0415 -- lazy import, avoids circular dependency
 
@@ -645,11 +646,45 @@ class Finding(BaseModel):
         # only perform post processing (in celery task) if needed. this check avoids submitting 1000s of tasks to celery that will do nothing
         from dojo.models import System_Settings  # noqa: PLC0415 -- lazy import, avoids circular dependency
         system_settings = System_Settings.objects.get()
-        if dedupe_option or issue_updater_option or (product_grading_option and system_settings.enable_product_grade) or push_to_jira:
+        # push_to_solarwinds joins this condition for the same reason push_to_jira is in
+        # it: an explicit push request must not be dropped just because every other
+        # post-processing option happens to be off. Note the SolarWinds *config-driven*
+        # mode (SolarWinds_Product.push_all_findings) is resolved inside
+        # post_process_finding_save_internal rather than here, so it rides along with
+        # the default options instead of needing its own flag at every call site - see
+        # _save_finding_with_solarwinds_sync for why that differs from JIRA.
+        if dedupe_option or issue_updater_option or (product_grading_option and system_settings.enable_product_grade) or push_to_jira or push_to_solarwinds:
             finding_helper.post_process_finding_save(self.id, dedupe_option=dedupe_option, rules_option=rules_option, product_grading_option=product_grading_option,
-                issue_updater_option=issue_updater_option, push_to_jira=push_to_jira, user=user, *args, **kwargs)
+                issue_updater_option=issue_updater_option, push_to_jira=push_to_jira, push_to_solarwinds=push_to_solarwinds, user=user, *args, **kwargs)
+        elif defer_post_processing:
+            # The importers save each finding with every option off and then hand the
+            # whole batch to post_process_findings_batch, which answers the SolarWinds
+            # routing question once for the batch. Asking it again per finding here
+            # would be a pure duplicate: +1 query on every finding of a 5,000-finding
+            # import, and a second dispatch for each one. R27 measured that cost and
+            # chose per-batch deliberately; this flag is what keeps that true.
+            logger.debug("post processing deferred to the batch path")
         else:
             logger.debug("no options selected that require finding post processing")
+            # ...except the config-driven SolarWinds push, which is *configuration*, not
+            # one of the post-processing options above, and so must not be switched off
+            # by a caller that passed every option False. save_no_options() is exactly
+            # that caller (and so, when product grading is disabled, are
+            # jira.helper.finding_link_jira and the SonarQube status updater), which
+            # previously meant push_all_findings silently never fired on those paths
+            # despite the docstring claiming it worked everywhere a finding is saved.
+            #
+            # Deliberately NOT folded into the condition above as another `or` branch:
+            # post_process_finding_save_internal also runs false-positive history, which
+            # is gated on system settings rather than on any option flag, so widening
+            # the gate would drag that onto save paths that deliberately skip all
+            # post-processing. This branch runs the SolarWinds half only.
+            #
+            # Cost: exactly one indexed EXISTS (R27's any_push_mapping_exists(), reached
+            # through push_finding's own short-circuit) on save paths that previously
+            # did no post-processing at all, and that are not covered by a batch.
+            # Deployments that never configure SolarWinds pay that and nothing more.
+            finding_helper.post_process_finding_save_solarwinds(self)
 
     def get_absolute_url(self):
         return reverse("view_finding", args=[str(self.id)])
@@ -1111,6 +1146,22 @@ class Finding(BaseModel):
         return self.finding_group is not None
 
     def save_no_options(self, *args, **kwargs):
+        """
+        Save with every post-processing *option* switched off.
+
+        Note what this does and does not switch off. The options are the dedupe /
+        rules / grading / issue-updater work and the explicit JIRA push. The
+        config-driven SolarWinds push is not one of them - it is deployment
+        configuration, and an admin who set ``push_all_findings`` did not thereby ask
+        for "unless the finding happens to be saved by something that passes no
+        options". It therefore still runs from here.
+
+        Callers that are going to hand the finding to ``post_process_findings_batch``
+        afterwards (all the importer call sites) must pass
+        ``defer_post_processing=True``, which suppresses it: the batch answers the same
+        question once for the whole batch, so doing it here too is a duplicate query
+        and a duplicate dispatch per finding.
+        """
         logger.debug("save_no_options")
         return self.save(dedupe_option=False, rules_option=False, product_grading_option=False,
              issue_updater_option=False, push_to_jira=False, user=None, *args, **kwargs)

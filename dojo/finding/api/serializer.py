@@ -304,6 +304,16 @@ class FindingSerializer(serializers.ModelSerializer):
     request_response = serializers.SerializerMethodField()
     accepted_risks = serializers.SerializerMethodField()
     push_to_jira = serializers.BooleanField(default=False)
+    push_to_solarwinds = serializers.BooleanField(
+        default=False,
+        write_only=True,
+        help_text=(
+            "Open a SolarWinds Service Desk incident for this finding. Ignored unless "
+            "the finding's product has a push-enabled SolarWinds mapping and its "
+            "severity has a priority label. Has no effect on a finding that already "
+            "has an incident - there is no outbound update path."
+        ),
+    )
     found_by = serializers.PrimaryKeyRelatedField(
         queryset=Test_Type.objects.all(), many=True,
     )
@@ -408,6 +418,7 @@ class FindingSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # push_all_issues already checked in api views.py
         push_to_jira = validated_data.pop("push_to_jira")
+        push_to_solarwinds = validated_data.pop("push_to_solarwinds", False)
 
         # Save vulnerability ids and pop them
         parsed_vulnerability_ids = []
@@ -456,6 +467,21 @@ class FindingSerializer(serializers.ModelSerializer):
             success, message = jira_services.push(instance, force_sync=True)
             if not success:
                 raise serializers.ValidationError(message)
+
+        if push_to_solarwinds:
+            from dojo.solarwinds import helper as solarwinds_helper  # noqa: PLC0415 circular import
+
+            # Dispatched after the save rather than threaded into it, because
+            # ModelSerializer.update() owns the instance.save() call and takes no
+            # kwargs. push_finding_explicitly() carries the guard that matters: if this
+            # finding auto-pushes, the save above already dispatched a task, and a
+            # second one would race it into creating two incidents (R25).
+            #
+            # Asynchronous, unlike the JIRA push above. JIRA pushes synchronously so a
+            # failure can be returned in the response; doing the same here would make a
+            # finding PUT block on a third-party HTTP call whose failures are already
+            # routed to the solarwinds_update notification and retried by the client.
+            solarwinds_helper.push_finding_explicitly(instance)
 
         return instance
 
@@ -558,6 +584,15 @@ class FindingCreateSerializer(serializers.ModelSerializer):
     )
     url = serializers.CharField(allow_null=True, default=None)
     push_to_jira = serializers.BooleanField(default=False)
+    push_to_solarwinds = serializers.BooleanField(
+        default=False,
+        write_only=True,
+        help_text=(
+            "Open a SolarWinds Service Desk incident for this finding. Ignored unless "
+            "the finding's product has a push-enabled SolarWinds mapping and its "
+            "severity has a priority label."
+        ),
+    )
     vulnerability_ids = VulnerabilityIdSerializer(
         source="vulnerability_id_set", many=True, required=False,
     )
@@ -588,6 +623,7 @@ class FindingCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         logger.debug("Creating finding with validated data: %s", validated_data)
         push_to_jira = validated_data.pop("push_to_jira", False)
+        push_to_solarwinds = validated_data.pop("push_to_solarwinds", False)
         notes = validated_data.pop("notes", None)
         found_by = validated_data.pop("found_by", None)
         reviewers = validated_data.pop("reviewers", None)
@@ -620,6 +656,14 @@ class FindingCreateSerializer(serializers.ModelSerializer):
 
         if push_to_jira:
             jira_services.push(new_finding)
+
+        if push_to_solarwinds:
+            from dojo.solarwinds import helper as solarwinds_helper  # noqa: PLC0415 circular import
+
+            # After the vulnerability ids are persisted, matching where the JIRA push
+            # sits. Guarded against double-dispatching the auto push - see
+            # push_finding_explicitly and the note in FindingSerializer.update.
+            solarwinds_helper.push_finding_explicitly(new_finding)
 
         # Create a notification
         dojo_dispatch_task(

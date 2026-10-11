@@ -198,6 +198,30 @@ URL_PERMISSIONS = {
     "tool_config": [("config", "dojo.view_tool_configuration")],
 
     # -----------------------------------------------------------------------
+    # SolarWinds Service Desk config
+    # (dojo/solarwinds/ui/views.py  ->  dojo/solarwinds/ui/urls.py)
+    #
+    # Same shape as Tool Config above: these routes hold an integration
+    # credential and tenant-wide routing defaults, so they are gated on the
+    # models' Django configuration permissions rather than on any Product the
+    # mapping happens to reference. The per-product mapping routes are gated the
+    # same way on purpose - deciding which tenant, site and assignment group a
+    # product's findings are ticketed into is integration configuration, not
+    # something a Product editor should reach.
+    # -----------------------------------------------------------------------
+    "solarwinds_instances": [("config", "dojo.view_solarwinds_instance")],
+    "view_solarwinds_instance": [("config", "dojo.view_solarwinds_instance")],
+    "add_solarwinds_instance": [("config", "dojo.add_solarwinds_instance")],
+    "edit_solarwinds_instance": [("config", "dojo.change_solarwinds_instance")],
+    "delete_solarwinds_instance": [("config", "dojo.delete_solarwinds_instance")],
+    # The probe reads the tenant and reveals its site/department/group ids, so it
+    # is gated as a change action, not a view one.
+    "test_solarwinds_instance": [("config", "dojo.change_solarwinds_instance")],
+    "add_solarwinds_product": [("config", "dojo.add_solarwinds_product")],
+    "edit_solarwinds_product": [("config", "dojo.change_solarwinds_product")],
+    "delete_solarwinds_product": [("config", "dojo.delete_solarwinds_product")],
+
+    # -----------------------------------------------------------------------
     # Benchmark (dojo/benchmark/views.py  ->  dojo/benchmark/urls.py)
     # -----------------------------------------------------------------------
     "view_product_benchmark": [("object", Product, "edit", "pid")],

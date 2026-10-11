@@ -60,6 +60,7 @@ from dojo.product_announcements import (
     LargeScanSizeProductAnnouncement,
     ScanTypeProductAnnouncement,
 )
+from dojo.solarwinds.ui import forms as solarwinds_forms
 from dojo.test.queries import get_authorized_tests
 from dojo.test.services import copy_test as copy_test_service
 from dojo.test.ui.filters import TestImportFilter
@@ -430,6 +431,7 @@ class AddFindingView(View):
             "pid": test.engagement.product.id,
             "form_error": False,
             "jform": self.get_jira_form(request, test, finding_form=finding_form),
+            "sform": self.get_solarwinds_form(request, test, finding_form=finding_form),
         }
 
     def get_finding_form(self, request: HttpRequest, test: Test):
@@ -462,6 +464,15 @@ class AddFindingView(View):
 
             return JIRAFindingForm(*args, **kwargs)
         return None
+
+    def get_solarwinds_form(self, request: HttpRequest, test: Test, finding_form: AddFindingForm = None):
+        # The finding does not exist yet, so only the product-level question can be
+        # answered here ("can this product push at all?"). Whether the severity being
+        # typed is actually mapped is validated by the form's own clean() against
+        # finding_form, not by hiding the field.
+        return solarwinds_forms.build_finding_form(
+            request, product=test.engagement.product, finding_form=finding_form,
+        )
 
     def validate_status_change(self, request: HttpRequest, context: dict):
         if ((context["form"]["active"].value() is False
@@ -551,6 +562,24 @@ class AddFindingView(View):
 
         return request, False, False
 
+    def process_solarwinds_form(self, request: HttpRequest, finding: Finding, context: dict):
+        """
+        Return ``(request, form_valid, push_to_solarwinds)`` for the SolarWinds checkbox.
+
+        Only the checkbox value, not ``is_push_all_findings_auto(...) or checkbox``:
+        the config-driven half is resolved inside the post-save hook rather than at call
+        sites (roadmap 8.5), so OR-ing it in here would be a no-op. See the twin of this
+        method on ``dojo/finding/ui/views.py``'s ``EditFinding``.
+        """
+        if context.get("sform") is None:
+            return request, True, False
+
+        if context["sform"].is_valid():
+            return request, True, bool(context["sform"].cleaned_data.get("push_to_solarwinds"))
+        add_field_errors_to_response(context["sform"])
+
+        return request, False, False
+
     def process_forms(self, request: HttpRequest, test: Test, context: dict):
         form_success_list = []
         finding = None
@@ -562,14 +591,16 @@ class AddFindingView(View):
         form_success_list.append(success)
         request, success, push_to_jira = self.process_jira_form(request, finding, context)
         form_success_list.append(success)
+        request, success, push_to_solarwinds = self.process_solarwinds_form(request, finding, context)
+        form_success_list.append(success)
         # Determine if all forms were successful
         all_forms_valid = all(form_success_list)
         # Check the validity of all the forms
         if all_forms_valid:
             # if we're removing the "duplicate" in the edit finding screen
             finding_helper.save_vulnerability_ids(finding, context["form"].cleaned_data["vulnerability_ids"].split())
-            # Push things to jira if needed
-            finding.save(push_to_jira=push_to_jira)
+            # Push things to jira / SolarWinds if needed
+            finding.save(push_to_jira=push_to_jira, push_to_solarwinds=push_to_solarwinds)
             # Save the burp req resp
             if "request" in context["form"].cleaned_data or "response" in context["form"].cleaned_data:
                 burp_rr = BurpRawRequestResponse(
